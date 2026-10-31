@@ -377,14 +377,10 @@ static void KSAttach(UIView *layoutStar) {
         [detail appendFormat:@"[%@ f=%@ var=%.0f] ", KSClassOf(lv), filter, var];
         if (var >= 0 && var < minVar) { minVar = var; bgLayer = lv; }
     }
-    // 有 Laetus 式贴图层（>=2 层）时，交给 setImage 双图族，不隐藏也不重复铺底
-    BOOL layered = (layers.count >= 2);
-    if (!layered) {
-        for (UIView *lv in layers) lv.hidden = NO;
-    } else {
-        for (UIView *lv in layers) lv.hidden = NO;
-    }
-    iv.hidden = layered;   // 有贴图层时隐藏我们自己的兜底背景
+    // 贴图替换由 setImage 负责；自己的背景图保留为兜底（在被覆盖时不可见）
+    for (UIView *lv in layers) lv.hidden = NO;
+    iv.hidden = NO;
+    (void)bgLayer;
 
     objc_setAssociatedObject(container, &kKSAssocSignature, sig, OBJC_ASSOCIATION_COPY_NONATOMIC);
     KSLog(@"attach key=%@ plane=%@ layers=%lu bgVar=%.0f %@",
