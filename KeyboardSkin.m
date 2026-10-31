@@ -358,14 +358,6 @@ static double KSImageVariance(UIImage *img) {
     return sum2 / n - mean * mean;
 }
 
-static UIImage *KSImageOfView(UIView *v) {
-    if ([v isKindOfClass:UIImageView.class]) return ((UIImageView *)v).image;
-    for (UIView *s2 in v.subviews) {
-        UIImage *i = KSImageOfView(s2);
-        if (i) return i;
-    }
-    return nil;
-}
 
 static void KSAttachLate(UIView *layoutStar);
 
@@ -487,8 +479,8 @@ static void KSAttach(UIView *layoutStar) {
     }
     (void)pad;
 
-    KSLog(@"attach plane=%@ layers=%lu bg=%@ plane=%@ minVar=%.0f maxVar=%.0f %@",
-          plane ?: @"(nil)", (unsigned long)layers.count,
+    KSLog(@"attach plane=%@ key=%@ layers=%lu bg=%@ plane=%@ minVar=%.0f maxVar=%.0f %@",
+          plane ?: @"(nil)", KSKeyForPlane(plane), (unsigned long)layers.count,
           bgLayer ? KSClassOf(bgLayer) : @"(nil)",
           planeLayer ? KSClassOf(planeLayer) : @"(nil)", minVar, maxVar, detail);
 
