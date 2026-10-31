@@ -231,67 +231,9 @@ static const char kKSAssocSignature = '\0';
 
 static NSString *KSClassOf(UIView *v) { return NSStringFromClass([v class]); }
 
-// 找候选背景视图：类名含 SplitImageView，或 frame 接近整条键盘宽度
-static void KSCollectCandidates(UIView *root, UIView *keyboard, NSMutableArray *out, int depth) {
-    if (!root || depth > 6) return;
-    for (UIView *v in root.subviews) {
-        NSString *cn = KSClassOf(v);
-        BOOL nameHit = [cn containsString:@"SplitImageView"] || [cn containsString:@"Background"];
-        BOOL sizeHit = keyboard.bounds.size.width > 0 &&
-                       v.frame.size.width >= keyboard.bounds.size.width * 0.9 &&
-                       v.frame.size.height >= 40;
-        if (nameHit || sizeHit) [out addObject:v];
-        KSCollectCandidates(v, keyboard, out, depth + 1);
-    }
-}
 
-// 给一个视图下所有 UIImageView 赋 image（含 UIKBSplitImageView 的 _fullView/_splitLeft/_splitRight）
-static int KSSetImageDeep(UIView *v, UIImage *img) {
-    int n = 0;
-    if ([v isKindOfClass:UIImageView.class]) {
-        ((UIImageView *)v).image = img;
-        n++;
-    }
-    for (NSString *key in @[@"fullView", @"_fullView", @"splitLeft", @"_splitLeft",
-                            @"splitRight", @"_splitRight", @"backgroundView", @"_backgroundView"]) {
-        @try {
-            id sub = [v valueForKey:key];
-            if ([sub isKindOfClass:UIImageView.class]) {
-                ((UIImageView *)sub).image = img;
-                n++;
-            }
-        } @catch (__unused NSException *e) {}
-    }
-    for (UIView *s in v.subviews) n += KSSetImageDeep(s, img);
-    return n;
-}
 
-// 隐藏系统材质/模糊层
-static void KSFadeMaterial(UIView *root, int depth) {
-    if (!root || depth > 5) return;
-    for (UIView *v in root.subviews) {
-        NSString *cn = KSClassOf(v);
-        if ([cn containsString:@"VisualEffect"] || [cn containsString:@"Backdrop"] ||
-            [cn containsString:@"Blur"] || [cn containsString:@"Material"]) {
-            if (v.alpha != 0) {
-                v.alpha = ksHideStock ? 0.0 : 1.0;
-                KSLog(@"material faded: %@ %@", cn, NSStringFromCGRect(v.frame));
-            }
-        }
-        KSFadeMaterial(v, depth + 1);
-    }
-}
 
-static void KSDump(UIView *v, int depth, NSMutableString *out) {
-    if (depth > 4) return;
-    for (UIView *s in v.subviews) {
-        NSString *indent = [@"" stringByPaddingToLength:depth*2 withString:@" " startingAtIndex:0];
-        [out appendFormat:@"%@%@ (%.0fx%.0f @%.0f,%.0f) a=%.1f %lu subs\n",
-            indent, KSClassOf(s), s.frame.size.width, s.frame.size.height,
-            s.frame.origin.x, s.frame.origin.y, s.alpha, (unsigned long)s.subviews.count];
-        KSDump(s, depth + 1, out);
-    }
-}
 
 // 亮度方差（12x12 采样）：背景层低方差，键帽/文字层高方差
 static double KSImageVariance(UIImage *img) {
