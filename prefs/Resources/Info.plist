@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleShortVersionString</key>
-	<string>1.1</string>
+	<string>1.2</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.ning.keyboardskinprefs</string>
 	<key>CFBundleSignature</key>
@@ -17,7 +17,7 @@
 	<key>CFBundlePackageType</key>
 	<string>BNDL</string>
 	<key>CFBundleVersion</key>
-	<string>1.1</string>
+	<string>1.2</string>
 	<key>NSPrincipalClass</key>
 	<string>KeyboardSkinRootListController</string>
 </dict>

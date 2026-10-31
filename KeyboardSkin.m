@@ -51,6 +51,7 @@ static BOOL ksHideStock = YES;
 static NSString *ksThemeName = nil;
 static NSString *ksThemePath = nil;
 static NSInteger ksGen = 0;
+static CGFloat ksCornerRadius = 0;
 
 static BOOL KSBool(NSString *key, BOOL dflt) {
     CFPreferencesAppSynchronize(CFSTR(KS_DOMAIN));
@@ -60,6 +61,17 @@ static BOOL KSBool(NSString *key, BOOL dflt) {
         if (CFGetTypeID(v) == CFBooleanGetTypeID()) out = [(id)CFBridgingRelease(v) boolValue];
         else if (CFGetTypeID(v) == CFNumberGetTypeID()) { int n = 0; CFNumberGetValue(v, kCFNumberIntType, &n); out = n != 0; }
         else CFRelease(v);
+    }
+    return out;
+}
+
+static NSInteger KSInt(NSString *key, NSInteger dflt) {
+    CFPreferencesAppSynchronize(CFSTR(KS_DOMAIN));
+    CFPropertyListRef v = CFPreferencesCopyAppValue((__bridge CFStringRef)key, CFSTR(KS_DOMAIN));
+    NSInteger out = dflt;
+    if (v) {
+        if (CFGetTypeID(v) == CFNumberGetTypeID()) { long long n = dflt; CFNumberGetValue(v, kCFNumberLongLongType, &n); out = n; }
+        CFRelease(v);
     }
     return out;
 }
@@ -110,6 +122,7 @@ static void KSResolveTheme(void) {
 static void KSReloadPrefs(void) {
     ksEnabled = KSBool(@"Enabled", YES);
     ksHideStock = KSBool(@"HideStock", YES);
+    ksCornerRadius = (CGFloat)KSInt(@"CornerRadius", 0);
     NSString *t = KSStr(@"ActiveTheme");
     if (![ksThemeName isEqualToString:t]) { ksThemeName = t; KSLog(@"prefs theme='%@'", t); }
     KSResolveTheme();
@@ -280,6 +293,41 @@ static void KSDump(UIView *v, int depth, NSMutableString *out) {
     }
 }
 
+// 亮度方差（12x12 采样）：背景层低方差，键帽/文字层高方差
+static double KSImageVariance(UIImage *img) {
+    if (!img) return -1;
+    CGImageRef cg = img.CGImage;
+    if (!cg) return -1;
+    size_t w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
+    if (!w || !h) return -1;
+    const int N = 12;
+    unsigned char buf[N * N * 4];
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGContextRef ctx = CGBitmapContextCreate(buf, N, N, 8, N * 4, cs,
+        kCGImageAlphaNoneSkipLast | kCGBitmapByteOrderDefault);
+    CGColorSpaceRelease(cs);
+    if (!ctx) return -1;
+    CGContextDrawImage(ctx, CGRectMake(0, 0, N, N), cg);
+    CGContextRelease(ctx);
+    double sum = 0, sum2 = 0;
+    for (int i = 0; i < N * N; i++) {
+        double y = 0.299*buf[i*4] + 0.587*buf[i*4+1] + 0.114*buf[i*4+2];
+        sum += y; sum2 += y*y;
+    }
+    double n = (double)(N * N);
+    double mean = sum / n;
+    return sum2 / n - mean * mean;
+}
+
+static UIImage *KSImageOfView(UIView *v) {
+    if ([v isKindOfClass:UIImageView.class]) return ((UIImageView *)v).image;
+    for (UIView *s2 in v.subviews) {
+        UIImage *i = KSImageOfView(s2);
+        if (i) return i;
+    }
+    return nil;
+}
+
 static void KSAttach(UIView *layoutStar) {
     if (!layoutStar || !ksEnabled || !ksThemePath) return;
     UIView *container = layoutStar.superview ?: layoutStar;
@@ -297,12 +345,12 @@ static void KSAttach(UIView *layoutStar) {
         return;
     }
 
-    NSString *sig = [NSString stringWithFormat:@"%@|%d|gen%ld|%.0fx%.0f", key, landscape, (long)ksGen,
-                     layoutStar.bounds.size.width, layoutStar.bounds.size.height];
+    NSString *sig = [NSString stringWithFormat:@"%@|%d|gen%ld|%.0fx%.0f|r%.0f", key, landscape, (long)ksGen,
+                     layoutStar.bounds.size.width, layoutStar.bounds.size.height, ksCornerRadius];
     NSString *last = objc_getAssociatedObject(container, &kKSAssocSignature);
-    if ([last isEqualToString:sig]) return;   // 已经处理过这组参数
+    if ([last isEqualToString:sig]) return;
 
-    // ---- A) 我们自己的背景 view（index 0 兜底）----
+    // 自己的背景 view（container 的 index 0）
     UIImageView *iv = objc_getAssociatedObject(container, &kKSAssocBackground);
     if (!iv) {
         iv = [[UIImageView alloc] init];
@@ -319,73 +367,55 @@ static void KSAttach(UIView *layoutStar) {
     iv.alpha = 1.0;
     [CATransaction commit];
 
-    // ---- B) 直接给系统背景 SplitImageView 赋图（0.6 证明有效）----
-    NSMutableArray *cands = [NSMutableArray array];
-    KSCollectCandidates(container, layoutStar, cands, 0);
-    KSCollectCandidates(layoutStar, layoutStar, cands, 0);
-    int applied = 0;
-    NSMutableString *candLog = [NSMutableString string];
-    for (UIView *v in cands) {
-        int n = KSSetImageDeep(v, img);
-        if (n > 0) applied++;
-        [candLog appendFormat:@"%@(%.0fx%.0f) set=%d; ", KSClassOf(v),
-            v.frame.size.width, v.frame.size.height, n];
+    // 收集整键面贴图层 + 应用键帽圆角
+    NSMutableArray *layers = [NSMutableArray array];
+    for (UIView *v in layoutStar.subviews) {
+        if (![KSClassOf(v) containsString:@"Keyplane"]) continue;
+        for (UIView *lv in v.subviews) {
+            if ([KSClassOf(lv) containsString:@"SplitImageView"] &&
+                lv.frame.size.width >= layoutStar.bounds.size.width * 0.9) {
+                [layers addObject:lv];
+            } else if (ksCornerRadius > 0 && [KSClassOf(lv) containsString:@"KeyView"]) {
+                lv.layer.cornerRadius = ksCornerRadius;
+                lv.layer.masksToBounds = YES;
+            }
+        }
     }
 
-    // ---- C) 隐藏系统材质层 ----
-    if (ksHideStock) { KSFadeMaterial(container, 0); KSFadeMaterial(layoutStar, 0); }
+    NSMutableString *detail = [NSMutableString string];
+    UIView *bgLayer = nil;
+    double minVar = 1e18;
+    for (UIView *lv in layers) {
+        double var = KSImageVariance(KSImageOfView(lv));
+        NSString *filter = @"-";
+        @try { filter = [lv valueForKey:@"filterType"] ?: @"-"; } @catch (__unused NSException *e) {}
+        [detail appendFormat:@"[%@ f=%@ var=%.0f] ", KSClassOf(lv), filter, var];
+        if (var >= 0 && var < minVar) { minVar = var; bgLayer = lv; }
+    }
+    for (UIView *lv in layers) lv.hidden = (ksHideStock && lv == bgLayer);
 
     objc_setAssociatedObject(container, &kKSAssocSignature, sig, OBJC_ASSOCIATION_COPY_NONATOMIC);
-    KSLog(@"attach key=%@ plane=%@ cands=%lu applied=%d [%@]",
-          key, plane ?: @"(nil)", (unsigned long)cands.count, applied, candLog);
-
-    // 前 3 次打印层级
-    static int dumps = 0;
-    if (dumps < 3) {
-        dumps++;
-        NSMutableString *d = [NSMutableString string];
-        [d appendFormat:@"--- hierarchy #%d container=%@ layout=%@ ---\n",
-            dumps, KSClassOf(container), KSClassOf(layoutStar)];
-        KSDump(container, 1, d);
-        KSLog(@"%@", d);
-    }
+    KSLog(@"attach key=%@ plane=%@ layers=%lu bgVar=%.0f %@",
+          key, plane ?: @"(nil)", (unsigned long)layers.count, minVar, detail);
 }
 
 #pragma mark - Hooks
 
-// ---- 关键通道：setImage:cachedWidth:keyplane:（0.6 已验证能换到背景）----
-// 只对"宽度接近整屏"的贴图视图换图 —— 键帽的 SplitImageView 只有几十点宽，必须放行
+// setImage:cachedWidth:keyplane: —— 只记录，不替换（避免覆盖键帽/文字贴图）
 static IMP orig_setImage = NULL;
 static void ks_setImage(UIView *self, SEL _cmd, UIImage *image, double width, id keyplane) {
-    UIImage *out = image;
     @try {
-        if (ksEnabled && ksThemePath) {
-            static int seen = 0;
-            CGFloat w = self.bounds.size.width;
-            if (w < 1) w = width;
-            CGFloat screenW = UIScreen.mainScreen.bounds.size.width;
-            BOOL isBg = (w >= screenW * 0.85);
-            if (seen < 30) {
-                seen++;
-                KSLog(@"setImage #%d self=%@ w=%.0f h=%.0f isBg=%d plane=%@",
-                      seen, KSClassOf(self), w, self.bounds.size.height, isBg,
-                      keyplane ? [keyplane valueForKey:@"name"] : @"(nil)");
-            }
-            if (isBg) {
-                NSString *plane = nil;
-                @try { plane = [keyplane valueForKey:@"name"]; } @catch (__unused NSException *e) {}
-                BOOL landscape = UIScreen.mainScreen.bounds.size.width > UIScreen.mainScreen.bounds.size.height;
-                UIImage *theme = KSImageForKey(KSKeyForPlane(plane), landscape);
-                if (theme) {
-                    out = theme;
-                    KSLog(@"setImage REPLACED for %@ (plane=%@)", KSKeyForPlane(plane), plane ?: @"(nil)");
-                }
-            }
+        static int seen = 0;
+        if (ksEnabled && seen < 24) {
+            seen++;
+            NSString *plane = nil;
+            @try { plane = [keyplane valueForKey:@"name"]; } @catch (__unused NSException *e) {}
+            KSLog(@"setImage #%d self=%@ %.0fx%.0f plane=%@",
+                  seen, KSClassOf(self), self.bounds.size.width, self.bounds.size.height, plane ?: @"(nil)");
         }
-    } @catch (NSException *e) { KSLog(@"exc setImage: %@", e); }
-    ((void (*)(id, SEL, UIImage *, double, id))orig_setImage)(self, _cmd, out, width, keyplane);
+    } @catch (__unused NSException *e) {}
+    ((void (*)(id, SEL, UIImage *, double, id))orig_setImage)(self, _cmd, image, width, keyplane);
 }
-
 
 static IMP orig_layoutSubviews = NULL;
 static void ks_layoutSubviews(UIView *self, SEL _cmd) {
@@ -461,7 +491,7 @@ __attribute__((constructor))
 static void KSInit(void) {
     @autoreleasepool {
         KSReloadPrefs();
-        KSLog(@"KeyboardSkin 1.1 init — enabled=%d hideStock=%d theme='%@' path=%@",
+        KSLog(@"KeyboardSkin 1.2 init — enabled=%d hideStock=%d theme='%@' path=%@",
               ksEnabled, ksHideStock, ksThemeName, ksThemePath);
         KSInstall();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
