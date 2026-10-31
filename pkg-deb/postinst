@@ -1,0 +1,29 @@
+#!/bin/sh
+set -e
+mkdir -p /var/mobile/Library/KeyboardSkin/Themes 2>/dev/null || true
+chmod 0755 /var/mobile/Library/KeyboardSkin /var/mobile/Library/KeyboardSkin/Themes 2>/dev/null || true
+chown mobile:mobile /var/mobile/Library/KeyboardSkin /var/mobile/Library/KeyboardSkin/Themes 2>/dev/null || true
+if [ ! -f /var/mobile/Library/KeyboardSkin/Themes/README.txt ]; then
+cat > /var/mobile/Library/KeyboardSkin/Themes/README.txt <<'TXT'
+键盘皮肤 主题目录
+====================
+
+放法一（单张图，最简单）：
+  /var/mobile/Library/KeyboardSkin/background.png
+  所有键盘面都用这一张。
+
+放法二（按键盘面分图）：
+  Themes/我的主题/
+    KeyboardMainBG.png        字母键盘
+    KeyboardNumbersBG.png     数字键盘
+    KeyboardEmojiBG.png       Emoji
+    KeyboardDictationBG.png   听写
+  可加方向：KeyboardMainBG-Portrait.png / -Landscape.png
+  可加屏高：KeyboardMainBG-Portrait-932h@3x.png
+  @3x / @2x 优先于无后缀；也可以放在 Images/ 子目录里。
+
+放好后到 设置 → 键盘皮肤 → 选择主题，重新弹出键盘生效。
+TXT
+chmod 0644 /var/mobile/Library/KeyboardSkin/Themes/README.txt
+fi
+exit 0
