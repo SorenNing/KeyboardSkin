@@ -52,6 +52,10 @@ static NSString *ksThemeName = nil;
 static NSString *ksThemePath = nil;
 static NSInteger ksGen = 0;
 static CGFloat ksCornerRadius = 0;
+static BOOL ksHideKeyCaps = NO;      // 隐藏键帽（保留字母）
+static NSInteger ksFillMode = 0;     // 0填充 1适应 2拉伸 3居中
+static CGFloat ksScale = 1.0;        // 背景缩放
+static CGFloat ksOffsetY = 0;        // 背景垂直偏移(点)
 
 static BOOL KSBool(NSString *key, BOOL dflt) {
     CFPreferencesAppSynchronize(CFSTR(KS_DOMAIN));
@@ -123,6 +127,10 @@ static void KSReloadPrefs(void) {
     ksEnabled = KSBool(@"Enabled", YES);
     ksHideStock = KSBool(@"HideStock", YES);
     ksCornerRadius = (CGFloat)KSInt(@"CornerRadius", 0);
+    ksHideKeyCaps = KSBool(@"HideKeyCaps", NO);
+    ksFillMode = KSInt(@"FillMode", 0);
+    ksScale = (CGFloat)KSInt(@"BgScale", 100) / 100.0;
+    ksOffsetY = (CGFloat)KSInt(@"BgOffsetY", 0);
     NSString *t = KSStr(@"ActiveTheme");
     if (![ksThemeName isEqualToString:t]) { ksThemeName = t; KSLog(@"prefs theme='%@'", t); }
     KSResolveTheme();
@@ -303,7 +311,17 @@ static void KSAttach(UIView *layoutStar) {
     }
     [CATransaction begin];
     [CATransaction setDisableActions:YES];
-    iv.frame = layoutStar.frame;
+    CGRect kf = layoutStar.frame;
+    // 缩放/偏移：以键盘中心为基准，偏移按键盘高度百分比
+    CGFloat ox = 0, oy = kf.size.height * (ksOffsetY / 100.0);
+    iv.transform = CGAffineTransformIdentity;
+    iv.frame = kf;
+    if (ksScale != 1.0) iv.transform = CGAffineTransformMakeScale(ksScale, ksScale);
+    iv.center = CGPointMake(CGRectGetMidX(kf) + ox, CGRectGetMidY(kf) + oy);
+    iv.contentMode = (ksFillMode == 1) ? UIViewContentModeScaleAspectFit
+                   : (ksFillMode == 2) ? UIViewContentModeScaleToFill
+                   : (ksFillMode == 3) ? UIViewContentModeCenter
+                                       : UIViewContentModeScaleAspectFill;
     if (iv.superview != container) [container insertSubview:iv atIndex:0];
     iv.image = img;
     iv.alpha = 1.0;
@@ -317,9 +335,20 @@ static void KSAttach(UIView *layoutStar) {
             if ([KSClassOf(lv) containsString:@"SplitImageView"] &&
                 lv.frame.size.width >= layoutStar.bounds.size.width * 0.9) {
                 [layers addObject:lv];
-            } else if (ksCornerRadius > 0 && [KSClassOf(lv) containsString:@"KeyView"]) {
-                lv.layer.cornerRadius = ksCornerRadius;
-                lv.layer.masksToBounds = YES;
+            } else if ([KSClassOf(lv) containsString:@"KeyView"]) {
+                if (ksCornerRadius > 0) {
+                    lv.layer.cornerRadius = ksCornerRadius;
+                    lv.layer.masksToBounds = YES;
+                }
+                if (ksHideKeyCaps) {
+                    // UIKBKeyView -hideKeyCap: 官方接口：隐藏键帽底但不影响字母
+                    SEL hk = NSSelectorFromString(@"hideKeyCap:");
+                    if ([lv respondsToSelector:hk]) {
+                        ((void (*)(id, SEL, BOOL))objc_msgSend)(lv, hk, YES);
+                        static int hkLogged = 0;
+                        if (hkLogged++ < 3) KSLog(@"hideKeyCap called on %@", KSClassOf(lv));
+                    }
+                }
             }
         }
     }
@@ -433,8 +462,8 @@ __attribute__((constructor))
 static void KSInit(void) {
     @autoreleasepool {
         KSReloadPrefs();
-        KSLog(@"KeyboardSkin 1.2 init — enabled=%d hideStock=%d theme='%@' path=%@",
-              ksEnabled, ksHideStock, ksThemeName, ksThemePath);
+        KSLog(@"KeyboardSkin 1.3 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
+              NSProcessInfo.processInfo.processName, ksEnabled, ksHideStock, ksThemeName, ksThemePath);
         KSInstall();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{ KSInstall(); });

@@ -74,9 +74,125 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
+			<string>背景调整</string>
+			<key>footerText</key>
+			<string>背景图与键盘对不齐时，用缩放和上下偏移微调。偏移按键盘高度百分比计算。</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSLinkListCell</string>
+			<key>default</key>
+			<integer>0</integer>
+			<key>defaults</key>
+			<string>com.ning.keyboardskin</string>
+			<key>detail</key>
+			<string>PSListItemsController</string>
+			<key>key</key>
+			<string>FillMode</string>
+			<key>label</key>
+			<string>填充方式</string>
+			<key>validTitles</key>
+			<array>
+				<string>填充（裁切）</string>
+				<string>适应（完整）</string>
+				<string>拉伸</string>
+				<string>居中（原始大小）</string>
+			</array>
+			<key>validValues</key>
+			<array>
+				<integer>0</integer>
+				<integer>1</integer>
+				<integer>2</integer>
+				<integer>3</integer>
+			</array>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSLinkListCell</string>
+			<key>default</key>
+			<integer>100</integer>
+			<key>defaults</key>
+			<string>com.ning.keyboardskin</string>
+			<key>detail</key>
+			<string>PSListItemsController</string>
+			<key>key</key>
+			<string>BgScale</string>
+			<key>label</key>
+			<string>背景缩放</string>
+			<key>validTitles</key>
+			<array>
+				<string>50%</string>
+				<string>75%</string>
+				<string>90%</string>
+				<string>100%（默认）</string>
+				<string>110%</string>
+				<string>125%</string>
+				<string>150%</string>
+			</array>
+			<key>validValues</key>
+			<array>
+				<integer>50</integer>
+				<integer>75</integer>
+				<integer>90</integer>
+				<integer>100</integer>
+				<integer>110</integer>
+				<integer>125</integer>
+				<integer>150</integer>
+			</array>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSLinkListCell</string>
+			<key>default</key>
+			<integer>0</integer>
+			<key>defaults</key>
+			<string>com.ning.keyboardskin</string>
+			<key>detail</key>
+			<string>PSListItemsController</string>
+			<key>key</key>
+			<string>BgOffsetY</string>
+			<key>label</key>
+			<string>背景上下偏移</string>
+			<key>validTitles</key>
+			<array>
+				<string>-40%</string>
+				<string>-20%</string>
+				<string>-10%</string>
+				<string>0（默认）</string>
+				<string>+10%</string>
+				<string>+20%</string>
+				<string>+40%</string>
+			</array>
+			<key>validValues</key>
+			<array>
+				<integer>-40</integer>
+				<integer>-20</integer>
+				<integer>-10</integer>
+				<integer>0</integer>
+				<integer>10</integer>
+				<integer>20</integer>
+				<integer>40</integer>
+			</array>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
 			<string>键帽</string>
 			<key>footerText</key>
 			<string>圆角只裁剪键帽图层，不影响文字渲染。</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.ning.keyboardskin</string>
+			<key>key</key>
+			<string>HideKeyCaps</string>
+			<key>label</key>
+			<string>隐藏键帽（保留字母）</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -132,7 +248,7 @@
 			<key>label</key>
 			<string>关于</string>
 			<key>footerText</key>
-			<string>键盘皮肤 1.2
+			<string>键盘皮肤 1.3
 作者: Ning
 日志: /var/mobile/Library/KeyboardSkin.log</string>
 		</dict>
