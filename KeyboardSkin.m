@@ -352,8 +352,6 @@ static void ks_hook_didChangeKeyplane(UIView *self, SEL _cmd, id context) {
     } @catch (NSException *e) { KSLog(@"exc keyplane: %@", e); }
 }
 
-static void ks_hook_attachLater(UIView *self) { KSAttachToLayout(self); }
-
 #pragma mark - 安装
 
 static void KSConfigChanged(CFNotificationCenterRef c, void *o, CFStringRef n, const void *p, CFDictionaryRef d) {
