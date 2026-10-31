@@ -370,23 +370,6 @@ static double KSImageVariance(UIImage *img) {
 
 
 // 功能键判定：空格/转换/地球/返回/删除/键盘切换/语言/听写/表情等 —— hideKeyCap 跳过它们
-static BOOL KSIsFunctionKey(UIView *kv) {
-    @try {
-        id tree = [kv valueForKey:@"key"];
-        if (!tree) return NO;
-        NSString *nm = [tree valueForKey:@"name"];
-        NSString *ds = [tree valueForKey:@"displayString"];
-        NSString *low = [NSString stringWithFormat:@"%@ %@", nm ?: @"", ds ?: @""].lowercaseString;
-        NSArray *kw = @[@"space", @"shift", @"globe", @"return", @"backspace", @"delete",
-                        @"keyboard", @"language", @"dictation", @"emoji", @"number",
-                        @"symbol", @"more", @"123", @"abc", @"next", @"tab", @"caps",
-                        @"escape", @"dock", @"keyplane", @"more"];
-        for (NSString *k in kw) {
-            if ([low containsString:k]) return YES;
-        }
-    } @catch (__unused NSException *e) {}
-    return NO;
-}
 
 static void KSAttachLate(UIView *layoutStar);
 
