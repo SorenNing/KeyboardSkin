@@ -419,11 +419,15 @@ static void KSAttach(UIView *layoutStar) {
             if ([cn containsString:@"SplitImageView"] && lv.frame.size.width >= layoutStar.bounds.size.width * 0.9) {
                 [layers addObject:lv];
             } else if ([cn containsString:@"KeyView"]) {
+                BOOL isAlphabetic = [ksLastPlane containsString:@"Letters"] ||
+                                    [ksLastPlane containsString:@"small-letters"] ||
+                                    [ksLastPlane containsString:@"capital-letters"];
                 if (ksCornerRadius > 0) {
                     lv.layer.cornerRadius = ksCornerRadius;
                     lv.layer.masksToBounds = YES;
                 }
-                if (ksHideKeyCaps) {
+                // hideKeyCap 只在字母面启用；数字/emoji 面直接应用会导致整键消失
+                if (ksHideKeyCaps && isAlphabetic) {
                     SEL hk = NSSelectorFromString(@"hideKeyCap:");
                     if ([lv respondsToSelector:hk]) ((void (*)(id, SEL, BOOL))objc_msgSend)(lv, hk, YES);
                 }
@@ -488,8 +492,8 @@ static void KSAttach(UIView *layoutStar) {
     }
     (void)pad;
 
-    KSLog(@"attach plane=%@ key=%@ layers=%lu bg=%@ plane=%@ minVar=%.0f maxVar=%.0f %@",
-          plane ?: @"(nil)", KSKeyForPlane(plane), (unsigned long)layers.count,
+    KSLog(@"attach plane=%@ lastPlane=%@ key=%@ layers=%lu bg=%@ plane=%@ minVar=%.0f maxVar=%.0f %@",
+          plane ?: @"(nil)", ksLastPlane ?: @"(nil)", KSKeyForPlane(plane), (unsigned long)layers.count,
           bgLayer ? KSClassOf(bgLayer) : @"(nil)",
           planeLayer ? KSClassOf(planeLayer) : @"(nil)", minVar, maxVar, detail);
 
@@ -668,7 +672,7 @@ __attribute__((constructor))
 static void KSInit(void) {
     @autoreleasepool {
         KSReloadPrefs();
-        KSLog(@"KeyboardSkin 1.5.1 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
+        KSLog(@"KeyboardSkin 1.5.2 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
               NSProcessInfo.processInfo.processName, ksEnabled, ksHideStock, ksThemeName, ksThemePath);
         KSInstall();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
