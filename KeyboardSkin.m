@@ -76,8 +76,17 @@ static NSInteger KSInt(NSString *key, NSInteger dflt) {
     CFPropertyListRef v = CFPreferencesCopyAppValue((__bridge CFStringRef)key, CFSTR(KS_DOMAIN));
     NSInteger out = dflt;
     if (v) {
-        if (CFGetTypeID(v) == CFNumberGetTypeID()) { long long n = dflt; CFNumberGetValue(v, kCFNumberLongLongType, &n); out = n; }
+        CFTypeID t = CFGetTypeID(v);
+        if (t == CFNumberGetTypeID()) {
+            long long n = dflt; CFNumberGetValue(v, kCFNumberLongLongType, &n); out = n;
+        } else if (t == CFStringGetTypeID()) {
+            out = [(__bridge NSString *)v integerValue];   // PSEditTextCell 存的是字符串
+        }
         CFRelease(v);
+    }
+    if (out != dflt) {
+        static int logged = 0;
+        if (logged++ < 8) KSLog(@"pref %@ = %ld (string-friendly)", key, (long)out);
     }
     return out;
 }
@@ -619,7 +628,8 @@ static void ks_showKeyboard(UIView *self, SEL _cmd, id traits, id screen, id spl
 
 static void KSConfigChanged(CFNotificationCenterRef c, void *o, CFStringRef n, const void *p, CFDictionaryRef d) {
     KSReloadPrefs();
-    KSLog(@"config changed");
+    KSLog(@"config changed: scale=%.2f offsetY=%.0f mode=%ld hideCaps=%d corner=%.0f",
+          ksScale, ksOffsetY, (long)ksFillMode, ksHideKeyCaps, ksCornerRadius);
 }
 
 static void KSInstall(void) {
@@ -658,7 +668,7 @@ __attribute__((constructor))
 static void KSInit(void) {
     @autoreleasepool {
         KSReloadPrefs();
-        KSLog(@"KeyboardSkin 1.5 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
+        KSLog(@"KeyboardSkin 1.5.1 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
               NSProcessInfo.processInfo.processName, ksEnabled, ksHideStock, ksThemeName, ksThemePath);
         KSInstall();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
