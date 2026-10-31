@@ -1,0 +1,38 @@
+name: Build KeyboardSkin (arm64e roothide)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: brew install make ldid dpkg gnu-tar xz rsync
+      - name: Install Theos (roothide) + iOS 16.5 SDK
+        run: |
+          set -euo pipefail
+          THEOS="$RUNNER_TEMP/theos"
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+          echo "$(brew --prefix gnu-tar)/libexec/gnubin" >> "$GITHUB_PATH"
+          git clone --recursive --depth 1 https://github.com/roothide/theos.git "$THEOS"
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git "$RUNNER_TEMP/sdks"
+          git -C "$RUNNER_TEMP/sdks" sparse-checkout set iPhoneOS16.5.sdk
+          mkdir -p "$THEOS/sdks" && cp -R "$RUNNER_TEMP/sdks/iPhoneOS16.5.sdk" "$THEOS/sdks/"
+      - name: Build package
+        run: |
+          set -euo pipefail
+          gmake clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide TARGET=iphone:clang:16.5:15.0 THEOS="$THEOS"
+      - name: Show artifact
+        run: ls -la packages/ && file packages/*.deb || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KeyboardSkin-arm64e
+          path: packages/*.deb
+          if-no-files-found: error
