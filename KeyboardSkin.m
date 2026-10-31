@@ -456,21 +456,28 @@ static void KSAttach(UIView *layoutStar) {
     NSString *plKey = KSKeyPlaneImageName(plane);
     UIImage *planeImg = plKey ? KSImageForKey(plKey, landscape) : nil;
 
-    if (bgLayer && bgImg) {
-        bgLayer.layer.contents = (__bridge id)bgImg.CGImage;
-        bgLayer.layer.contentsGravity = kCAGravityResizeAspectFill;
-        bgLayer.layer.contentsScale = UIScreen.mainScreen.scale;
-        // 缩放/偏移直接作用到该贴图层（用户可调的可见背景）
-        bgLayer.layer.transform = CATransform3DIdentity;
+    // 关键：直接改“当前可见、截图里没对齐”的那层 —— 即方差最高的键面贴图层
+    UIView *visibleLayer = planeLayer ?: bgLayer;
+    if (visibleLayer && bgImg) {
+        visibleLayer.layer.contents = (__bridge id)bgImg.CGImage;
+        visibleLayer.layer.contentsGravity = kCAGravityResizeAspectFill;
+        visibleLayer.layer.contentsScale = UIScreen.mainScreen.scale;
+        // 偏移/缩放直接作用到可见层
+        visibleLayer.layer.transform = CATransform3DIdentity;
         if (ksScale != 1.0 || ksOffsetY != 0) {
             CGFloat sc = ksScale;
-            CGFloat offY = bgLayer.bounds.size.height * (ksOffsetY / 100.0);
+            CGFloat offY = visibleLayer.bounds.size.height * (ksOffsetY / 100.0);
             CATransform3D t = CATransform3DIdentity;
             t = CATransform3DTranslate(t, 0, offY, 0);
             t = CATransform3DScale(t, sc, sc, 1);
-            bgLayer.layer.transform = t;
+            visibleLayer.layer.transform = t;
             static int transLogged = 0;
-            if (transLogged++ < 5) KSLog(@"bgLayer transform scale=%.2f off=%.0f", sc, offY);
+            if (transLogged++ < 5) KSLog(@"visibleLayer transform scale=%.2f off=%.0f (layer=%@)",
+                                        sc, offY, KSClassOf(visibleLayer));
+        }
+        // 隐藏最下面那张系统兜底，避免双重层互相遮挡
+        if (bgLayer && bgLayer != visibleLayer) {
+            bgLayer.hidden = YES;
         }
     }
     if (planeLayer && planeLayer != bgLayer && planeImg) {
@@ -693,7 +700,7 @@ __attribute__((constructor))
 static void KSInit(void) {
     @autoreleasepool {
         KSReloadPrefs();
-        KSLog(@"KeyboardSkin 1.5.3 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
+        KSLog(@"KeyboardSkin 1.5.4 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
               NSProcessInfo.processInfo.processName, ksEnabled, ksHideStock, ksThemeName, ksThemePath);
         KSInstall();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
