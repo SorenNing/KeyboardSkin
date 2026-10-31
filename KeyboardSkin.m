@@ -368,6 +368,26 @@ static double KSImageVariance(UIImage *img) {
 }
 
 
+
+// 功能键判定：空格/转换/地球/返回/删除/键盘切换/语言/听写/表情等 —— hideKeyCap 跳过它们
+static BOOL KSIsFunctionKey(UIView *kv) {
+    @try {
+        id tree = [kv valueForKey:@"key"];
+        if (!tree) return NO;
+        NSString *nm = [tree valueForKey:@"name"];
+        NSString *ds = [tree valueForKey:@"displayString"];
+        NSString *low = [NSString stringWithFormat:@"%@ %@", nm ?: @"", ds ?: @""].lowercaseString;
+        NSArray *kw = @[@"space", @"shift", @"globe", @"return", @"backspace", @"delete",
+                        @"keyboard", @"language", @"dictation", @"emoji", @"number",
+                        @"symbol", @"more", @"123", @"abc", @"next", @"tab", @"caps",
+                        @"escape", @"dock", @"keyplane", @"more"];
+        for (NSString *k in kw) {
+            if ([low containsString:k]) return YES;
+        }
+    } @catch (__unused NSException *e) {}
+    return NO;
+}
+
 static void KSAttachLate(UIView *layoutStar);
 
 static void KSAttach(UIView *layoutStar) {
@@ -409,6 +429,7 @@ static void KSAttach(UIView *layoutStar) {
     iv.image = bgImg;
     iv.alpha = 1.0;
     [CATransaction commit];
+    iv.hidden = YES;   // 可见背景由 bgLayer 承担，自己的兜底隐藏避免双层
 
     // 2) keyplane 内的整键面贴图层：按 contents 方差分类替换
     NSMutableArray *layers = [NSMutableArray array];
@@ -426,7 +447,8 @@ static void KSAttach(UIView *layoutStar) {
                     lv.layer.cornerRadius = ksCornerRadius;
                     lv.layer.masksToBounds = YES;
                 }
-                // hideKeyCap 只在字母面启用；数字/emoji 面直接应用会导致整键消失
+                // hideKeyCap 在字母面所有键上启用（含空格/123/功能键）
+                // —— 用户要求：功能键也保留上面的字，仅隐藏键帽底
                 if (ksHideKeyCaps && isAlphabetic) {
                     SEL hk = NSSelectorFromString(@"hideKeyCap:");
                     if ([lv respondsToSelector:hk]) ((void (*)(id, SEL, BOOL))objc_msgSend)(lv, hk, YES);
@@ -455,6 +477,18 @@ static void KSAttach(UIView *layoutStar) {
         bgLayer.layer.contents = (__bridge id)bgImg.CGImage;
         bgLayer.layer.contentsGravity = kCAGravityResizeAspectFill;
         bgLayer.layer.contentsScale = UIScreen.mainScreen.scale;
+        // 缩放/偏移直接作用到该贴图层（用户可调的可见背景）
+        bgLayer.layer.transform = CATransform3DIdentity;
+        if (ksScale != 1.0 || ksOffsetY != 0) {
+            CGFloat sc = ksScale;
+            CGFloat offY = bgLayer.bounds.size.height * (ksOffsetY / 100.0);
+            CATransform3D t = CATransform3DIdentity;
+            t = CATransform3DTranslate(t, 0, offY, 0);
+            t = CATransform3DScale(t, sc, sc, 1);
+            bgLayer.layer.transform = t;
+            static int transLogged = 0;
+            if (transLogged++ < 5) KSLog(@"bgLayer transform scale=%.2f off=%.0f", sc, offY);
+        }
     }
     if (planeLayer && planeLayer != bgLayer && planeImg) {
         planeLayer.layer.contents = (__bridge id)planeImg.CGImage;
@@ -507,6 +541,10 @@ static void KSAttach(UIView *layoutStar) {
 static void KSAttachLate(UIView *layoutStar) {
     @try {
         if (!ksEnabled || !ksThemePath || !layoutStar.superview) return;
+        static NSTimeInterval lastLate = 0;
+        NSTimeInterval now = [NSDate.date timeIntervalSince1970];
+        if (now - lastLate < 0.8) return;   // 去重，防 layoutSubviews 风暴
+        lastLate = now;
         BOOL landscape = UIScreen.mainScreen.bounds.size.width > UIScreen.mainScreen.bounds.size.height;
         UIImage *bgImg = KSImageForKey(@"KeyboardMainBG", landscape);
         if (!bgImg) return;
@@ -672,7 +710,7 @@ __attribute__((constructor))
 static void KSInit(void) {
     @autoreleasepool {
         KSReloadPrefs();
-        KSLog(@"KeyboardSkin 1.5.2 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
+        KSLog(@"KeyboardSkin 1.5.3 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
               NSProcessInfo.processInfo.processName, ksEnabled, ksHideStock, ksThemeName, ksThemePath);
         KSInstall();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
