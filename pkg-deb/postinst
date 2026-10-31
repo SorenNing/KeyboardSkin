@@ -29,8 +29,8 @@ fi
 
 # ---- 内置主题（Coolwcat）安装到用户可见目录 ----
 SRC=""
-for d in /var/jb/Library/KeyboardSkin/Themes /Library/KeyboardSkin/Themes; do
-  if [ -d "$d" ] && [ -n "$(ls -A "$d" 2>/dev/null)" ]; then SRC="$d"; break; fi
+for d in /var/jb/Library/KeyboardSkin/Themes /Library/KeyboardSkin/Themes ./Library/KeyboardSkin/Themes; do
+  if [ -d "$d" ] && ls "$d"/*.theme >/dev/null 2>&1; then SRC="$d"; break; fi
 done
 DST=/var/mobile/Library/KeyboardSkin/Themes
 mkdir -p "$DST" 2>/dev/null || true

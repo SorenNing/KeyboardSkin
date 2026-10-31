@@ -80,99 +80,19 @@
 		</dict>
 		<dict>
 			<key>cell</key>
-			<string>PSLinkListCell</string>
+			<string>PSEditTextCell</string>
 			<key>default</key>
 			<integer>0</integer>
 			<key>defaults</key>
 			<string>com.ning.keyboardskin</string>
-			<key>detail</key>
-			<string>PSListItemsController</string>
-			<key>key</key>
-			<string>FillMode</string>
-			<key>label</key>
-			<string>填充方式</string>
-			<key>validTitles</key>
-			<array>
-				<string>填充（裁切）</string>
-				<string>适应（完整）</string>
-				<string>拉伸</string>
-				<string>居中（原始大小）</string>
-			</array>
-			<key>validValues</key>
-			<array>
-				<integer>0</integer>
-				<integer>1</integer>
-				<integer>2</integer>
-				<integer>3</integer>
-			</array>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSLinkListCell</string>
-			<key>default</key>
-			<integer>100</integer>
-			<key>defaults</key>
-			<string>com.ning.keyboardskin</string>
-			<key>detail</key>
-			<string>PSListItemsController</string>
-			<key>key</key>
-			<string>BgScale</string>
-			<key>label</key>
-			<string>背景缩放</string>
-			<key>validTitles</key>
-			<array>
-				<string>50%</string>
-				<string>75%</string>
-				<string>90%</string>
-				<string>100%（默认）</string>
-				<string>110%</string>
-				<string>125%</string>
-				<string>150%</string>
-			</array>
-			<key>validValues</key>
-			<array>
-				<integer>50</integer>
-				<integer>75</integer>
-				<integer>90</integer>
-				<integer>100</integer>
-				<integer>110</integer>
-				<integer>125</integer>
-				<integer>150</integer>
-			</array>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSLinkListCell</string>
-			<key>default</key>
-			<integer>0</integer>
-			<key>defaults</key>
-			<string>com.ning.keyboardskin</string>
-			<key>detail</key>
-			<string>PSListItemsController</string>
 			<key>key</key>
 			<string>BgOffsetY</string>
 			<key>label</key>
-			<string>背景上下偏移</string>
-			<key>validTitles</key>
-			<array>
-				<string>-40%</string>
-				<string>-20%</string>
-				<string>-10%</string>
-				<string>0（默认）</string>
-				<string>+10%</string>
-				<string>+20%</string>
-				<string>+40%</string>
-			</array>
-			<key>validValues</key>
-			<array>
-				<integer>-40</integer>
-				<integer>-20</integer>
-				<integer>-10</integer>
-				<integer>0</integer>
-				<integer>10</integer>
-				<integer>20</integer>
-				<integer>40</integer>
-			</array>
+			<string>上下偏移（%，负=上移）</string>
+			<key>placeholder</key>
+			<string>-100 ~ 100</string>
+			<key>keyboard</key>
+			<string>numbersAndPunctuation</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -238,6 +158,14 @@
 			<key>cell</key>
 			<string>PSButtonCell</string>
 			<key>action</key>
+			<string>disableSkin:</string>
+			<key>label</key>
+			<string>停用皮肤（恢复系统键盘）</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>action</key>
 			<string>respring:</string>
 			<key>label</key>
 			<string>注销…</string>
@@ -248,7 +176,7 @@
 			<key>label</key>
 			<string>关于</string>
 			<key>footerText</key>
-			<string>键盘皮肤 1.4（内置 Coolwcat 主题）
+			<string>键盘皮肤 1.5（内置 Coolwcat）
 作者: Ning
 日志: /var/mobile/Library/KeyboardSkin.log</string>
 		</dict>

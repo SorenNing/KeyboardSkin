@@ -150,6 +150,16 @@ static NSString * const kKSDomain = @"com.ning.keyboardskin";
     [self ksAlert:@"已发现" message:m copyPath:KS_THEMES];
 }
 
+-(void)disableSkin:(PSSpecifier *)specifier {
+    CFPreferencesSetAppValue(CFSTR("Enabled"), (__bridge CFPropertyListRef)@NO,
+                             (__bridge CFStringRef)kKSDomain);
+    CFPreferencesAppSynchronize((__bridge CFStringRef)kKSDomain);
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                         (__bridge CFStringRef)KS_CHANGED, NULL, NULL, true);
+    [self reloadSpecifiers];
+    [self ksAlert:@"已停用" message:@"皮肤已关闭，重新弹出键盘恢复系统外观。重新打开「启用」即可恢复皮肤。" copyPath:nil];
+}
+
 -(void)respring:(PSSpecifier *)specifier {
     pid_t pid = fork();
     if (pid == 0) {
