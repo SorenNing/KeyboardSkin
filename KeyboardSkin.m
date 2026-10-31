@@ -457,7 +457,10 @@ static void KSAttach(UIView *layoutStar) {
 
     // Laetus 式：背景完全交给自己的视图（缩放/偏移/填充直接作用到它）
     // 系统三层一律不替换 contents，只隐藏最低方差（背景）层，键帽/文字层保持原样
-    if (ksHideStock && bgLayer) bgLayer.hidden = YES;
+    if (ksHideStock && bgLayer) {
+        bgLayer.alpha = 0.0;
+        bgLayer.hidden = NO;
+    }
     // 确保背景视图可见
     iv.hidden = NO;
     if (planeLayer && planeLayer != bgLayer && planeImg) {
@@ -680,7 +683,7 @@ __attribute__((constructor))
 static void KSInit(void) {
     @autoreleasepool {
         KSReloadPrefs();
-        KSLog(@"KeyboardSkin 1.6 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
+        KSLog(@"KeyboardSkin 1.7 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
               NSProcessInfo.processInfo.processName, ksEnabled, ksHideStock, ksThemeName, ksThemePath);
         KSInstall();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
