@@ -1,6 +1,6 @@
 Package: com.ning.keyboardskin
 Name: 键盘皮肤
-Version: 1.9.1
+Version: 1.9.2
 Architecture: iphoneos-arm64e
 Description: 系统键盘皮肤替换：把自己的图片铺成键盘背景（自动隐藏系统背景层），支持按 keyplane 换图 (iOS 15-17)
 Maintainer: Ning
