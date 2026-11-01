@@ -173,13 +173,6 @@ static NSString *KSKeyForPlane(NSString *name) {
     return @"KeyboardMainBG";
 }
 
-static NSString *KSKeyPlaneImageName(NSString *plane) {
-    if (!plane.length) return @"KeyboardLettersKeyPlane";
-    NSString *p = plane.lowercaseString;
-    if ([p containsString:@"number"] || [p containsString:@"pad"]) return @"KeyboardNumbersKeyPlane";
-    if ([p containsString:@"emoji"] || [p containsString:@"dictation"]) return nil;
-    return @"KeyboardLettersKeyPlane";
-}
 
 
 #pragma mark - 图片
@@ -628,21 +621,23 @@ static void ks_setImage(UIView *self, SEL _cmd, UIImage *image, double width, id
                 KSLog(@"setImage(obs) class=%@ w=%.0f ft=%@ plane=%@ var=%.0f",
                       KSClassOf(self), f.size.width, type ?: @"-", plane ?: @"-", var);
             }
-            // 按传入 image 亮度方差分类替换（Laetus 式）：
-            //   低方差 = 纯色/背景层 → KeyboardMainBG/NumbersBG/EmojiBG
-            //   高方差 = 键面层（键帽/文字视觉）→ Keyboard*KeyPlane（主题键帽造型，字母由系统叠加）
-            //   -1（无法采样）→ 放行原图，避免误伤
+            // 只替换 keyplane 立面底层（index 0/1）的 SplitImageView —— 即键盘背景层。
+            // 上层（index≥2，含键帽+字母合成视觉）一律放行原图，保证字母不丢。
+            NSInteger idx = -1;
+            UIView *sv = self.superview;
+            if (sv) {
+                NSArray *subs = sv.subviews;
+                NSInteger i = [subs indexOfObject:self];
+                if (i != NSNotFound) idx = i;
+            }
             double var = KSImageVariance(image);
             NSString *key = nil;
-            BOOL isBG = NO;
-            if (var >= 0 && var < 600.0) { isBG = YES; key = KSKeyForPlane(plane); }
-            else if (var >= 600.0) { key = KSKeyPlaneImageName(plane); }
-            NSString *kind = isBG ? @"bg" : @"plane";
+            if (idx >= 0 && idx <= 1) key = KSKeyForPlane(plane);
             UIImage *theme = (key.length ? KSImageForKey(key, NO) : nil);
             if (theme) {
                 image = theme;
-                KSLog(@"replace setImage %@ key=%@ w=%.0f var=%.0f plane=%@",
-                      kind, key, width, var, plane ?: @"-");
+                KSLog(@"replace setImage bg idx=%ld key=%@ w=%.0f var=%.0f plane=%@",
+                      (long)idx, key, width, var, plane ?: @"-");
             }
         }
     } @catch (NSException *e) { KSLog(@"exc setImage: %@", e); }
@@ -745,7 +740,7 @@ __attribute__((constructor))
 static void KSInit(void) {
     @autoreleasepool {
         KSReloadPrefs();
-        KSLog(@"KeyboardSkin 1.8.2 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
+        KSLog(@"KeyboardSkin 1.8.3 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
               NSProcessInfo.processInfo.processName, ksEnabled, ksHideStock, ksThemeName, ksThemePath);
         KSInstall();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
