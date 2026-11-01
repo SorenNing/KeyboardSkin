@@ -173,6 +173,14 @@ static NSString *KSKeyForPlane(NSString *name) {
     return @"KeyboardMainBG";
 }
 
+static NSString *KSKeyPlaneImageName(NSString *plane) {
+    if (!plane.length) return @"KeyboardLettersKeyPlane";
+    NSString *p = plane.lowercaseString;
+    if ([p containsString:@"number"] || [p containsString:@"pad"]) return @"KeyboardNumbersKeyPlane";
+    if ([p containsString:@"emoji"] || [p containsString:@"dictation"]) return nil;
+    return @"KeyboardLettersKeyPlane";
+}
+
 
 #pragma mark - 图片
 
@@ -620,13 +628,21 @@ static void ks_setImage(UIView *self, SEL _cmd, UIImage *image, double width, id
                 KSLog(@"setImage(obs) class=%@ w=%.0f ft=%@ plane=%@ var=%.0f",
                       KSClassOf(self), f.size.width, type ?: @"-", plane ?: @"-", var);
             }
-            // Laetus 式：把整键盘背景画布替换为主题图。
-            // 键帽/文字由每个 UIKBKeyView 单独叠加绘制，不受影响。
-            NSString *key = KSKeyForPlane(plane);
-            UIImage *theme = KSImageForKey(key, NO);
+            // 按传入 image 亮度方差分类替换（Laetus 式）：
+            //   低方差 = 纯色/背景层 → KeyboardMainBG/NumbersBG/EmojiBG
+            //   高方差 = 键面层（键帽/文字视觉）→ Keyboard*KeyPlane（主题键帽造型，字母由系统叠加）
+            //   -1（无法采样）→ 放行原图，避免误伤
+            double var = KSImageVariance(image);
+            NSString *key = nil;
+            BOOL isBG = NO;
+            if (var >= 0 && var < 600.0) { isBG = YES; key = KSKeyForPlane(plane); }
+            else if (var >= 600.0) { key = KSKeyPlaneImageName(plane); }
+            NSString *kind = isBG ? @"bg" : @"plane";
+            UIImage *theme = (key.length ? KSImageForKey(key, NO) : nil);
             if (theme) {
                 image = theme;
-                KSLog(@"replace setImage key=%@ w=%.0f plane=%@", key, width, plane ?: @"-");
+                KSLog(@"replace setImage %@ key=%@ w=%.0f var=%.0f plane=%@",
+                      kind, key, width, var, plane ?: @"-");
             }
         }
     } @catch (NSException *e) { KSLog(@"exc setImage: %@", e); }
@@ -729,7 +745,7 @@ __attribute__((constructor))
 static void KSInit(void) {
     @autoreleasepool {
         KSReloadPrefs();
-        KSLog(@"KeyboardSkin 1.8.1 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
+        KSLog(@"KeyboardSkin 1.8.2 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
               NSProcessInfo.processInfo.processName, ksEnabled, ksHideStock, ksThemeName, ksThemePath);
         KSInstall();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
