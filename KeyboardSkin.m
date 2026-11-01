@@ -16,6 +16,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #include <CydiaSubstrate/CydiaSubstrate.h>
+#include <dlfcn.h>
 
 #define KS_DOMAIN  "com.ning.keyboardskin"
 #define KS_CHANGED "com.ning.keyboardskin.changed"
@@ -53,6 +54,7 @@ static void KSLog(NSString *format, ...) {
 
 static BOOL ksEnabled = YES;
 static BOOL ksHideStock = YES;
+static BOOL ksEnableImageReplace = NO;
 static NSString *ksThemeName = nil;
 static NSString *ksThemePath = nil;
 static NSInteger ksGen = 0;
@@ -146,6 +148,7 @@ static void KSResolveTheme(void) {
 static void KSReloadPrefs(void) {
     ksEnabled = KSBool(@"Enabled", YES);
     ksHideStock = KSBool(@"HideStock", YES);
+    ksEnableImageReplace = KSBool(@"EnableImageReplace", NO);
     ksCornerRadius = (CGFloat)KSInt(@"CornerRadius", 0);
     ksHideKeyCaps = KSBool(@"HideKeyCaps", NO);
     ksFillMode = KSInt(@"FillMode", 0);
@@ -158,6 +161,61 @@ static void KSReloadPrefs(void) {
     NSString *t = KSStr(@"ActiveTheme");
     if (![ksThemeName isEqualToString:t]) { ksThemeName = t; KSLog(@"prefs theme='%@'", t); }
     KSResolveTheme();
+}
+
+#pragma mark - 颜色引擎（UIKBGetNamedColor）
+
+static UIColor *KSColorRGB(int rgb) {
+    return [UIColor colorWithRed:((rgb >> 16) & 0xFF) / 255.0
+                           green:((rgb >> 8) & 0xFF) / 255.0
+                            blue:(rgb & 0xFF) / 255.0
+                           alpha:1.0];
+}
+
+static UIColor *ksColourForName(NSString *n) {
+    BOOL dark = [ksThemeName localizedCaseInsensitiveContainsString:@"dark"];
+    if ([n isEqualToString:@"keyboardBackgroundLightColor"] || [n isEqualToString:@"keyboardBackgroundDarkColor"]) {
+        return dark ? KSColorRGB(0x26262a) : KSColorRGB(0xe8e8ec);
+    }
+    if ([n isEqualToString:@"keyboardKeyColor"] || [n isEqualToString:@"keyboardCapColor"]) {
+        return dark ? KSColorRGB(0x37373d) : KSColorRGB(0xffffff);
+    }
+    if ([n isEqualToString:@"keyboardTextColor"]) {
+        return dark ? KSColorRGB(0xffffff) : KSColorRGB(0x1a1a1a);
+    }
+    if ([n isEqualToString:@"popupBackgroundColor"]) {
+        return dark ? KSColorRGB(0x3a3a42) : KSColorRGB(0xffffff);
+    }
+    if ([n isEqualToString:@"popupTextColor"]) {
+        return dark ? KSColorRGB(0xffffff) : KSColorRGB(0x1a1a1a);
+    }
+    if ([n isEqualToString:@"predictionBarBackgroundColor"]) {
+        return dark ? KSColorRGB(0x26262a) : KSColorRGB(0xf0f0f4);
+    }
+    if ([n isEqualToString:@"predictionTextColor"]) {
+        return dark ? KSColorRGB(0xdddddd) : KSColorRGB(0x222222);
+    }
+    if ([n isEqualToString:@"emojiSearchBackgroundColor"]) {
+        return dark ? KSColorRGB(0x37373d) : KSColorRGB(0xffffff);
+    }
+    return nil;
+}
+
+static UIColor *(*orig_getNamedColor)(CFStringRef) = NULL;
+static UIColor *ksGetNamedColor(CFStringRef name) {
+    if (name && ksEnabled) {
+        NSString *n = (__bridge NSString *)name;
+        UIColor *c = ksColourForName(n);
+        if (c) return c;
+        static NSMutableSet *seen;
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{ seen = [NSMutableSet set]; });
+        if (![seen containsObject:n]) {
+            [seen addObject:n];
+            KSLog(@"colour req: %@", n);
+        }
+    }
+    return ((UIColor *(*)(CFStringRef))orig_getNamedColor)(name);
 }
 
 #pragma mark - keyplane → 键名
@@ -632,7 +690,7 @@ static void ks_setImage(UIView *self, SEL _cmd, UIImage *image, double width, id
             }
             double var = KSImageVariance(image);
             NSString *key = nil;
-            if (idx >= 0 && idx <= 1) key = KSKeyForPlane(plane);
+            if (ksEnableImageReplace && idx >= 0 && idx <= 1) key = KSKeyForPlane(plane);
             UIImage *theme = (key.length ? KSImageForKey(key, NO) : nil);
             if (theme) {
                 image = theme;
@@ -727,6 +785,12 @@ static void KSInstall(void) {
             KSLog(@"hook: UIKBSplitImageView setImage:cachedWidth:keyplane: (size-gated)");
         }
     }
+    void *namedSym = dlsym(RTLD_DEFAULT, "UIKBGetNamedColor");
+    if (namedSym && !orig_getNamedColor) {
+        MSHookFunction(namedSym, (void *)ksGetNamedColor, (void **)&orig_getNamedColor);
+        KSLog(@"hook: UIKBGetNamedColor");
+    }
+
     if (!orig_showKeyboard) {
         SEL s = NSSelectorFromString(@"showKeyboardWithInputTraits:screenTraits:splitTraits:");
         if ([star instancesRespondToSelector:s]) {
@@ -740,7 +804,7 @@ __attribute__((constructor))
 static void KSInit(void) {
     @autoreleasepool {
         KSReloadPrefs();
-        KSLog(@"KeyboardSkin 1.8.3 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
+        KSLog(@"KeyboardSkin 1.9.0 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
               NSProcessInfo.processInfo.processName, ksEnabled, ksHideStock, ksThemeName, ksThemePath);
         KSInstall();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
