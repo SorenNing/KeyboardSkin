@@ -170,6 +170,16 @@ static UIColor *KSColorRGB(int rgb) {
                            alpha:1.0];
 }
 
+static UIColor *KSColorForFactoryKey(NSString *key) {
+    BOOL dark = [ksThemeName localizedCaseInsensitiveContainsString:@"dark"];
+    if ([key isEqualToString:@"keycap"]) return dark ? KSColorRGB(0x3a3a42) : KSColorRGB(0xffffff);
+    if ([key isEqualToString:@"ctrlbg"]) return dark ? KSColorRGB(0x47474f) : KSColorRGB(0xefeff4);
+    if ([key isEqualToString:@"ctrlfg"]) return dark ? KSColorRGB(0xffffff) : KSColorRGB(0x1a1a1a);
+    if ([key isEqualToString:@"shadow"]) return dark ? KSColorRGB(0x000000) : KSColorRGB(0x000000);
+    if ([key isEqualToString:@"lowbg"]) return dark ? KSColorRGB(0x26262a) : KSColorRGB(0xe8e8ec);
+    return nil;
+}
+
 static UIColor *ksColourForName(NSString *n) {
     BOOL dark = [ksThemeName localizedCaseInsensitiveContainsString:@"dark"];
     if ([n isEqualToString:@"keyboardBackgroundLightColor"] || [n isEqualToString:@"keyboardBackgroundDarkColor"]) {
@@ -203,6 +213,10 @@ static UIColor *(*orig_getNamedColor)(CFStringRef) = NULL;
 static UIColor *ksGetNamedColor(CFStringRef name) {
     if (name && ksEnabled) {
         NSString *n = (__bridge NSString *)name;
+        if ([n hasPrefix:@"ks_"]) {
+            NSString *key = [n substringFromIndex:3];
+            return KSColorForFactoryKey(key);
+        }
         UIColor *c = ksColourForName(n);
         if (c) return c;
         static NSMutableSet *seen;
@@ -215,6 +229,49 @@ static UIColor *ksGetNamedColor(CFStringRef name) {
     }
     return ((UIColor *(*)(CFStringRef))orig_getNamedColor)(name);
 }
+
+// ---- UIKBRenderFactory 返回“颜色名”，系统再经 UIKBGetNamedColor 取色。
+// 我们 hook 颜色名方法，改成自家前缀色名，再在 UIKBGetNamedColor 里拦住返回主题色。
+static NSString *KSFactoryColorName(NSString *key) {
+    return [@"ks_" stringByAppendingString:key];
+}
+typedef id (*RenderFactoryFn)(id, SEL);
+static RenderFactoryFn orig_factoryDefaultKeyBG;
+static id ks_factoryDefaultKeyBG(id self, SEL _cmd) { return KSFactoryColorName(@"keycap"); }
+static RenderFactoryFn orig_factoryCtrlBG;
+static id ks_factoryCtrlBG(id self, SEL _cmd) { return KSFactoryColorName(@"ctrlbg"); }
+static RenderFactoryFn orig_factoryCtrlFG;
+static id ks_factoryCtrlFG(id self, SEL _cmd) { return KSFactoryColorName(@"ctrlfg"); }
+static RenderFactoryFn orig_factoryShadow;
+static id ks_factoryShadow(id self, SEL _cmd) { return KSFactoryColorName(@"shadow"); }
+static RenderFactoryFn orig_factoryLowBG;
+static id ks_factoryLowBG(id self, SEL _cmd) { return KSFactoryColorName(@"lowbg"); }
+
+static void KSHookFactoryColorNames(void) {
+    Class cls = NSClassFromString(@"UIKBRenderFactory");
+    if (!cls) return;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        SEL s;
+        s = NSSelectorFromString(@"defaultKeyBackgroundColorName");
+        if (s && [cls instancesRespondToSelector:s] && !orig_factoryDefaultKeyBG)
+            MSHookMessageEx(cls, s, (IMP)ks_factoryDefaultKeyBG, (IMP *)&orig_factoryDefaultKeyBG);
+        s = NSSelectorFromString(@"controlKeyBackgroundColorName");
+        if (s && [cls instancesRespondToSelector:s] && !orig_factoryCtrlBG)
+            MSHookMessageEx(cls, s, (IMP)ks_factoryCtrlBG, (IMP *)&orig_factoryCtrlBG);
+        s = NSSelectorFromString(@"controlKeyForegroundColorName");
+        if (s && [cls instancesRespondToSelector:s] && !orig_factoryCtrlFG)
+            MSHookMessageEx(cls, s, (IMP)ks_factoryCtrlFG, (IMP *)&orig_factoryCtrlFG);
+        s = NSSelectorFromString(@"defaultKeyShadowColorName");
+        if (s && [cls instancesRespondToSelector:s] && !orig_factoryShadow)
+            MSHookMessageEx(cls, s, (IMP)ks_factoryShadow, (IMP *)&orig_factoryShadow);
+        s = NSSelectorFromString(@"lowQualityLayeredBackgroundColorName");
+        if (s && [cls instancesRespondToSelector:s] && !orig_factoryLowBG)
+            MSHookMessageEx(cls, s, (IMP)ks_factoryLowBG, (IMP *)&orig_factoryLowBG);
+        KSLog(@"hook: UIKBRenderFactory color name methods");
+    });
+}
+
 
 #pragma mark - 图层处理
 
@@ -295,6 +352,7 @@ static void KSInstall(void) {
             KSLog(@"hook: UIKBSplitImageView setImage:cachedWidth:keyplane: (obs)");
         }
     }
+    KSHookFactoryColorNames();
     void *namedSym = dlsym(RTLD_DEFAULT, "UIKBGetNamedColor");
     if (namedSym && !orig_getNamedColor) {
         MSHookFunction(namedSym, (void *)ksGetNamedColor, (void **)&orig_getNamedColor);
@@ -307,7 +365,7 @@ __attribute__((constructor))
 static void KSInit(void) {
     @autoreleasepool {
         KSReloadPrefs();
-        KSLog(@"KeyboardSkin 1.9.2 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
+        KSLog(@"KeyboardSkin 1.9.3 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
               NSProcessInfo.processInfo.processName, ksEnabled, ksHideStock, ksThemeName, ksThemePath);
         KSInstall();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
