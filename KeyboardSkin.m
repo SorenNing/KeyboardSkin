@@ -438,6 +438,7 @@ static double KSImageVariance(UIImage *img) {
 
 static void KSAttach(UIView *layoutStar) {
     if (!layoutStar) return;
+    if (!ksEnabled) return;   // 诊断：总开关关闭时完全不触碰键盘渲染
     UIView *container = layoutStar.superview ?: layoutStar;
     if (!container) return;
 
@@ -804,7 +805,7 @@ __attribute__((constructor))
 static void KSInit(void) {
     @autoreleasepool {
         KSReloadPrefs();
-        KSLog(@"KeyboardSkin 1.9.0 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
+        KSLog(@"KeyboardSkin 1.9.1 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
               NSProcessInfo.processInfo.processName, ksEnabled, ksHideStock, ksThemeName, ksThemePath);
         KSInstall();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
