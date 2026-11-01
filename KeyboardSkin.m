@@ -164,13 +164,12 @@ static void KSReloadPrefs(void) {
 
 static NSString *KSKeyForPlane(NSString *name) {
     if (!name.length) return @"KeyboardMainBG";
-    if ([name isEqualToString:@"small-letters"] || [name isEqualToString:@"capital-letters"]) return @"KeyboardMainBG";
-    if ([name isEqualToString:@"numbers-and-punctuation"] || [name isEqualToString:@"numbers-and-punctuation-alternative"]) return @"KeyboardNumbersBG";
-    if ([name isEqualToString:@"emoji-keyboard"]) return @"KeyboardEmojiBG";
-    if ([name hasSuffix:@"-pad"]) return @"KeyboardNumberPadBG";
-    if ([name isEqualToString:@"autofill"]) return @"KeyboardAutoFillBG";
-    if ([name isEqualToString:@"picker"]) return @"KeyboardPickerBG";
-    if ([name isEqualToString:@"dictation"]) return @"KeyboardDictationBG";
+    NSString *p = name.lowercaseString;
+    if ([p containsString:@"number"] || [p containsString:@"pad"]) return @"KeyboardNumbersBG";
+    if ([p containsString:@"emoji"]) return @"KeyboardEmojiBG";
+    if ([p containsString:@"dictation"]) return @"KeyboardDictationBG";
+    if ([p containsString:@"autofill"]) return @"KeyboardAutoFillBG";
+    if ([p containsString:@"picker"]) return @"KeyboardPickerBG";
     return @"KeyboardMainBG";
 }
 
@@ -524,21 +523,13 @@ static void KSAttach(UIView *layoutStar) {
         }
     };
 
-    if (!ksEnabled || !ksThemePath) {
-        for (UIView *lv in layers) lv.alpha = 1.0;
-        iv.hidden = YES;
-        restorePrediction();
-    } else if (!ksHideStock) {
-        for (UIView *lv in layers) lv.alpha = 1.0;
-        iv.hidden = NO;
-        restorePrediction();
-    } else {
-        if (bgLayer) { bgLayer.alpha = 0.0; bgLayer.hidden = NO; }
-        iv.hidden = NO;
-    }
+    // 背景已由 ks_setImage 替换整键盘背景画布负责（Laetus 式）。
+    // 不再透明任何系统键面层：minVar 是最低方差层，含键帽/文字视觉，
+    // 透明它会全白。自插 iv 也停用（改由 setImage 替换承载）。
+    iv.hidden = YES;
+    restorePrediction();
 
-    // 不再修改系统键面贴图 contents（Laetus 的 setImage 通道在当前系统不触发，
-    // 事后改写会在系统重绘时被覆盖，并可能误伤键帽/文字）
+    // 系统键面贴图 contents 保持原样，由 UIKBKeyView 单独叠加键帽/文字
 
     // 3) 顶部预测栏背景（灰色横条）
     UIEdgeInsets pad = UIEdgeInsetsZero;
@@ -616,23 +607,30 @@ static void KSAttach(UIView *layoutStar) {
 // 记录 filterType/plane/var，用于诊断真实图层语义。
 static IMP orig_setImage = NULL;
 static void ks_setImage(UIView *self, SEL _cmd, UIImage *image, double width, id keyplane) {
-    UIImage *out = image;
     @try {
-        if (ksEnabled && ksThemePath && image) {
+        if (ksEnabled && ksThemePath.length && image) {
             CGRect f = self.bounds;
             NSString *type = nil;
             @try { type = [self valueForKey:@"filterType"]; } @catch (__unused NSException *e) {}
             NSString *plane = nil;
             @try { plane = [keyplane valueForKey:@"name"]; } @catch (__unused NSException *e) {}
             static int logs = 0;
-            if (logs++ < 20) {
+            if (logs++ < 30) {
                 double var = KSImageVariance(image);
                 KSLog(@"setImage(obs) class=%@ w=%.0f ft=%@ plane=%@ var=%.0f",
                       KSClassOf(self), f.size.width, type ?: @"-", plane ?: @"-", var);
             }
+            // Laetus 式：把整键盘背景画布替换为主题图。
+            // 键帽/文字由每个 UIKBKeyView 单独叠加绘制，不受影响。
+            NSString *key = KSKeyForPlane(plane);
+            UIImage *theme = KSImageForKey(key, NO);
+            if (theme) {
+                image = theme;
+                KSLog(@"replace setImage key=%@ w=%.0f plane=%@", key, width, plane ?: @"-");
+            }
         }
     } @catch (NSException *e) { KSLog(@"exc setImage: %@", e); }
-    ((void (*)(id, SEL, UIImage *, double, id))orig_setImage)(self, _cmd, out, width, keyplane);
+    ((void (*)(id, SEL, UIImage *, double, id))orig_setImage)(self, _cmd, image, width, keyplane);
 }
 
 static IMP orig_layoutSubviews = NULL;
@@ -731,7 +729,7 @@ __attribute__((constructor))
 static void KSInit(void) {
     @autoreleasepool {
         KSReloadPrefs();
-        KSLog(@"KeyboardSkin 1.8 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
+        KSLog(@"KeyboardSkin 1.8.1 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
               NSProcessInfo.processInfo.processName, ksEnabled, ksHideStock, ksThemeName, ksThemePath);
         KSInstall();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
