@@ -242,6 +242,7 @@ static UIColor *ksGetNamedColor(CFStringRef name) {
         NSString *n = (__bridge NSString *)name;
         if ([n hasPrefix:@"ks_"]) {
             NSString *key = [n substringFromIndex:3];
+            KSLog(@"colour hit ks_%@ -> %@", key, [key uppercaseString]);
             return KSColorForFactoryKey(key);
         }
         UIColor *c = ksColourForName(n);
@@ -266,26 +267,36 @@ typedef id (*RenderFactoryFn)(id, SEL);
 static RenderFactoryFn orig_factoryDefaultKeyBG;
 static id ks_factoryDefaultKeyBG(id self, SEL _cmd) {
     if (!ksEnabled || !ksColorEngine) return orig_factoryDefaultKeyBG(self, _cmd);
+    id orig = orig_factoryDefaultKeyBG(self, _cmd);
+    KSLog(@"factory defaultKeyBG: %@", orig);
     return KSFactoryColorName(@"keycap");
 }
 static RenderFactoryFn orig_factoryCtrlBG;
 static id ks_factoryCtrlBG(id self, SEL _cmd) {
     if (!ksEnabled || !ksColorEngine) return orig_factoryCtrlBG(self, _cmd);
+    id orig = orig_factoryCtrlBG(self, _cmd);
+    KSLog(@"factory ctrlBG: %@", orig);
     return KSFactoryColorName(@"ctrlbg");
 }
 static RenderFactoryFn orig_factoryCtrlFG;
 static id ks_factoryCtrlFG(id self, SEL _cmd) {
     if (!ksEnabled || !ksColorEngine) return orig_factoryCtrlFG(self, _cmd);
+    id orig = orig_factoryCtrlFG(self, _cmd);
+    KSLog(@"factory ctrlFG: %@", orig);
     return KSFactoryColorName(@"ctrlfg");
 }
 static RenderFactoryFn orig_factoryShadow;
 static id ks_factoryShadow(id self, SEL _cmd) {
     if (!ksEnabled || !ksColorEngine) return orig_factoryShadow(self, _cmd);
+    id orig = orig_factoryShadow(self, _cmd);
+    KSLog(@"factory shadow: %@", orig);
     return KSFactoryColorName(@"shadow");
 }
 static RenderFactoryFn orig_factoryLowBG;
 static id ks_factoryLowBG(id self, SEL _cmd) {
     if (!ksEnabled || !ksColorEngine) return orig_factoryLowBG(self, _cmd);
+    id orig = orig_factoryLowBG(self, _cmd);
+    KSLog(@"factory lowBG: %@", orig);
     return KSFactoryColorName(@"lowbg");
 }
 
