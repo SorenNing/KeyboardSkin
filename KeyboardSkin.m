@@ -27,22 +27,27 @@
 #pragma mark - 日志
 
 static void KSLog(NSString *format, ...) {
-    static NSInteger lines = -1;
-    if (lines < 0) { lines = 0; unlink(KS_LOG); }
-    if (lines > 6000) return;
+    // 不断清空日志：每个进程都会写同一文件，最早的进程会被后来的覆盖。
+    // 改为：始终追加，并带进程名+PID，方便区分哪个进程在写。
+    // 不删除旧日志；键盘服务、宿主 App、设置进程会同时写入同一文件。
+    // 只追加并带 PID，避免后启动进程清空前一个进程的证据。
+    static NSInteger lines = 0;
+    if (lines > 8000) return;
     va_list args; va_start(args, format);
     NSString *s = [[NSString alloc] initWithFormat:format arguments:args];
     va_end(args);
-    NSString *out = [NSString stringWithFormat:@"[ks %@] %@\n",
-        [NSDate.date descriptionWithLocale:@"HH:mm:ss"], s];
+    NSString *proc = NSProcessInfo.processInfo.processName;
+    NSString *out = [NSString stringWithFormat:@"[ks %@ pid=%d proc=%@] %@\n",
+        [NSDate.date descriptionWithLocale:@"HH:mm:ss"], getpid(), proc, s];
+    lines++;
     NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:@KS_LOG];
     if (!fh) {
         [@"" writeToFile:@KS_LOG atomically:YES encoding:NSUTF8StringEncoding error:NULL];
         fh = [NSFileHandle fileHandleForWritingAtPath:@KS_LOG];
     }
     if (fh) { [fh seekToEndOfFile]; [fh writeData:[out dataUsingEncoding:NSUTF8StringEncoding]]; [fh closeFile]; }
-    lines++;
 }
+
 
 #pragma mark - 偏好
 
@@ -145,7 +150,11 @@ static void KSReloadPrefs(void) {
     ksHideKeyCaps = KSBool(@"HideKeyCaps", NO);
     ksFillMode = KSInt(@"FillMode", 0);
     ksScale = (CGFloat)KSInt(@"BgScale", 100) / 100.0;
+    if (ksScale < 0.5) ksScale = 0.5;
+    if (ksScale > 2.0) ksScale = 2.0;
     ksOffsetY = (CGFloat)KSInt(@"BgOffsetY", 0);
+    if (ksOffsetY < -100) ksOffsetY = -100;
+    if (ksOffsetY > 100) ksOffsetY = 100;
     NSString *t = KSStr(@"ActiveTheme");
     if (![ksThemeName isEqualToString:t]) { ksThemeName = t; KSLog(@"prefs theme='%@'", t); }
     KSResolveTheme();
@@ -165,15 +174,6 @@ static NSString *KSKeyForPlane(NSString *name) {
     return @"KeyboardMainBG";
 }
 
-// keyplane 名 -> 键面图层键名（Laetus 主题命名）
-static NSString *KSKeyPlaneImageName(NSString *plane) {
-    if (!plane.length) return nil;
-    if ([plane isEqualToString:@"small-letters"] || [plane isEqualToString:@"capital-letters"]) return @"KeyboardLettersKeyPlane";
-    if ([plane isEqualToString:@"numbers-and-punctuation"] ||
-        [plane isEqualToString:@"numbers-and-punctuation-alternative"]) return @"KeyboardNumbersKeyPlane";
-    if ([plane hasSuffix:@"-pad"]) return @"KeyboardNumberPadKeyPlane";
-    return nil;   // emoji / dictation 等没有键面图
-}
 
 #pragma mark - 图片
 
@@ -279,6 +279,13 @@ static UIImage *KSImageForKey(NSString *key, BOOL landscape) {
             if (img) { ksCache[ck] = img; KSLog(@"img(prefix): %@/%@", dir.lastPathComponent, best); return img; }
         }
     }
+    // 主题内背景兜底：MainBG -> NumbersBG -> EmojiBG
+    if ([key isEqualToString:@"KeyboardMainBG"]) {
+        for (NSString *fb in @[@"KeyboardNumbersBG", @"KeyboardEmojiBG"]) {
+            UIImage *img = KSImageForKey(fb, landscape);
+            if (img) { ksCache[ck] = img; KSLog(@"img(theme-fallback): %@", fb); return img; }
+        }
+    }
     // 单图兜底
     if ([fm fileExistsAtPath:@KS_SINGLE]) {
         UIImage *img = KSLoad(@KS_SINGLE);
@@ -290,7 +297,7 @@ static UIImage *KSImageForKey(NSString *key, BOOL landscape) {
 #pragma mark - 图层处理
 
 static const char kKSAssocBackground = '\0';
-static const char kKSAssocSignature = '\0';
+static const char kKSAssocColor = '\1';
 
 static NSString *KSClassOf(UIView *v) { return NSStringFromClass([v class]); }
 
@@ -371,22 +378,41 @@ static double KSImageVariance(UIImage *img) {
 
 // 功能键判定：空格/转换/地球/返回/删除/键盘切换/语言/听写/表情等 —— hideKeyCap 跳过它们
 
-static void KSAttachLate(UIView *layoutStar);
-
 static void KSAttach(UIView *layoutStar) {
-    if (!layoutStar || !ksEnabled || !ksThemePath) return;
+    if (!layoutStar) return;
     UIView *container = layoutStar.superview ?: layoutStar;
     if (!container) return;
 
+    // 节流：同一平面+设置组合，0.35s 内不重复扫描（layoutSubviews 高频触发）
+    static NSMapTable<UIView *, NSString *> *lastSigs;
+    static NSMapTable<UIView *, NSNumber *> *lastTimes;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        lastSigs = [NSMapTable weakToStrongObjectsMapTable];
+        lastTimes = [NSMapTable weakToStrongObjectsMapTable];
+    });
+    BOOL landscapeNow = UIScreen.mainScreen.bounds.size.width > UIScreen.mainScreen.bounds.size.height;
+    NSString *sig = [NSString stringWithFormat:@"%@|%d|%ld|%ld|%ld|%ld",
+                     KSLastPlaneName() ?: @"", landscapeNow, (long)ksGen, (long)ksFillMode,
+                     (long)(ksScale*100), (long)ksOffsetY];
+    NSTimeInterval nowT = [NSDate.date timeIntervalSince1970];
+    NSString *lastSig = [lastSigs objectForKey:layoutStar];
+    NSTimeInterval lastT = [[lastTimes objectForKey:layoutStar] doubleValue];
+    if ([sig isEqualToString:lastSig] && nowT - lastT < 0.35) return;
+    [lastSigs setObject:sig forKey:layoutStar];
+    [lastTimes setObject:@(nowT) forKey:layoutStar];
+
     BOOL landscape = UIScreen.mainScreen.bounds.size.width > UIScreen.mainScreen.bounds.size.height;
     NSString *plane = KSLastPlaneName();
-    NSString *bgKey = @"KeyboardMainBG";
+    NSString *bgKey = KSKeyForPlane(plane);
 
-    UIImage *bgImg = KSImageForKey(bgKey, landscape);
-    if (!bgImg) {
-        static BOOL miss = NO;
-        if (!miss) { miss = YES; KSLog(@"NO IMAGE %@ in %@", bgKey, ksThemePath.lastPathComponent); }
-        return;
+    UIImage *bgImg = nil;
+    if (ksEnabled && ksThemePath.length) {
+        bgImg = KSImageForKey(bgKey, landscape);
+        if (!bgImg) {
+            static BOOL miss = NO;
+            if (!miss) { miss = YES; KSLog(@"NO IMAGE %@ in %@", bgKey, ksThemePath.lastPathComponent); }
+        }
     }
 
     // 1) 兜底背景视图（container index 0）
@@ -394,7 +420,7 @@ static void KSAttach(UIView *layoutStar) {
     if (!iv) {
         iv = [[UIImageView alloc] init];
         iv.userInteractionEnabled = NO;
-        iv.clipsToBounds = YES;
+        iv.clipsToBounds = NO;
         objc_setAssociatedObject(container, &kKSAssocBackground, iv, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     [CATransaction begin];
@@ -402,15 +428,24 @@ static void KSAttach(UIView *layoutStar) {
     CGRect kf = layoutStar.frame;
     iv.transform = CGAffineTransformIdentity;
     iv.frame = kf;
-    if (ksScale != 1.0) iv.transform = CGAffineTransformMakeScale(ksScale, ksScale);
+    iv.transform = (ksScale == 1.0) ? CGAffineTransformIdentity
+                                    : CGAffineTransformMakeScale(ksScale, ksScale);
     iv.center = CGPointMake(CGRectGetMidX(kf), CGRectGetMidY(kf) + kf.size.height * (ksOffsetY / 100.0));
     iv.contentMode = (ksFillMode == 1) ? UIViewContentModeScaleAspectFit
                    : (ksFillMode == 2) ? UIViewContentModeScaleToFill
                    : (ksFillMode == 3) ? UIViewContentModeCenter
                                        : UIViewContentModeScaleAspectFill;
-    if (iv.superview != container) [container insertSubview:iv atIndex:0];
-    iv.image = bgImg;
-    iv.alpha = 1.0;
+    if (iv.superview != container) {
+        if (container != layoutStar && layoutStar.superview) {
+            [container insertSubview:iv belowSubview:layoutStar];
+        } else {
+            [container addSubview:iv];
+        }
+    }
+    if (bgImg) {
+        iv.image = bgImg;
+        iv.alpha = 1.0;
+    }
     [CATransaction commit];
 
     // 2) keyplane 内的整键面贴图层：按 contents 方差分类替换
@@ -425,22 +460,37 @@ static void KSAttach(UIView *layoutStar) {
                 BOOL isAlphabetic = [ksLastPlane containsString:@"Letters"] ||
                                     [ksLastPlane containsString:@"small-letters"] ||
                                     [ksLastPlane containsString:@"capital-letters"];
+                // 功能键豁免：空格/返回/删除/切换字符/地球/听写/表情等不隐藏
+                BOOL isSpecial = NO;
+                NSInteger dispType = 0;
+                NSString *keyName = nil;
+                @try { dispType = [[lv valueForKey:@"displayType"] integerValue]; } @catch (__unused NSException *e) {}
+                @try { keyName = [lv valueForKeyPath:@"key.name"]; } @catch (__unused NSException *e) {}
+                if (dispType >= 2) isSpecial = YES;   // 0 未知/1 字符：不算功能键
+                if (keyName.length) {
+                    NSString *k = keyName.lowercaseString;
+                    if ([k containsString:@"space"] || [k containsString:@"return"] ||
+                        [k containsString:@"delete"] || [k containsString:@"shift"] ||
+                        [k containsString:@"globe"] || [k containsString:@"dictation"] ||
+                        [k containsString:@"dismiss"] || [k containsString:@"more"] ||
+                        [k isEqualToString:@"123"] || [k isEqualToString:@"abc"] ||
+                        [k containsString:@"emoji"] || [k containsString:@","]) isSpecial = YES;
+                }
+                if (!isSpecial && lv.bounds.size.width > 65) isSpecial = YES; // 超宽键
                 if (ksCornerRadius > 0) {
                     lv.layer.cornerRadius = ksCornerRadius;
                     lv.layer.masksToBounds = YES;
                 }
-                // hideKeyCap 在字母面所有键上启用（含空格/123/功能键）
-                // —— 用户要求：功能键也保留上面的字，仅隐藏键帽底
-                if (ksHideKeyCaps && isAlphabetic) {
+                if (isAlphabetic && !isSpecial) {
                     SEL hk = NSSelectorFromString(@"hideKeyCap:");
-                    if ([lv respondsToSelector:hk]) ((void (*)(id, SEL, BOOL))objc_msgSend)(lv, hk, YES);
+                    if ([lv respondsToSelector:hk]) ((void (*)(id, SEL, BOOL))objc_msgSend)(lv, hk, ksHideKeyCaps);
                 }
             }
         }
     }
 
     NSMutableString *detail = [NSMutableString string];
-    UIView *bgLayer = nil, *planeLayer = nil;
+    UIView *bgLayer = nil;
     double minVar = 1e18, maxVar = -1;
     for (UIView *lv in layers) {
         CGImageRef cg = KSContentCGImage(lv);
@@ -448,26 +498,47 @@ static void KSAttach(UIView *layoutStar) {
         [detail appendFormat:@"[%@ var=%.0f] ", KSClassOf(lv), var];
         if (var >= 0) {
             if (var < minVar) { minVar = var; bgLayer = lv; }
-            if (var > maxVar) { maxVar = var; planeLayer = lv; }
+            if (var > maxVar) { maxVar = var; }
         }
     }
 
-    NSString *plKey = KSKeyPlaneImageName(plane);
-    UIImage *planeImg = plKey ? KSImageForKey(plKey, landscape) : nil;
-
     // Laetus 式：背景完全交给自己的视图（缩放/偏移/填充直接作用到它）
-    // 系统三层一律不替换 contents，只隐藏最低方差（背景）层，键帽/文字层保持原样
-    if (ksHideStock && bgLayer) {
-        bgLayer.alpha = 0.0;
-        bgLayer.hidden = NO;
+    // 系统三层一律不替换 contents，只在识别出背景层时透明化（避免误伤键面）。
+    // 开关关闭/停用时必须恢复被透明化的系统层。
+    // 预测栏还原：移除 pv 并恢复宿主原始背景色
+    void (^restorePrediction)(void) = ^{
+        for (UIView *v in layoutStar.subviews) {
+            if ([KSClassOf(v) containsString:@"Keyplane"]) continue;
+            CGFloat hgt = v.frame.size.height;
+            if (hgt < 24 || hgt > 90) continue;
+            UIImageView *pv = objc_getAssociatedObject(v, &kKSAssocBackground);
+            if (pv) {
+                [pv removeFromSuperview];
+                objc_setAssociatedObject(v, &kKSAssocBackground, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
+            UIColor *oc = objc_getAssociatedObject(v, &kKSAssocColor);
+            if (oc) {
+                v.backgroundColor = oc;
+                objc_setAssociatedObject(v, &kKSAssocColor, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            }
+        }
+    };
+
+    if (!ksEnabled || !ksThemePath) {
+        for (UIView *lv in layers) lv.alpha = 1.0;
+        iv.hidden = YES;
+        restorePrediction();
+    } else if (!ksHideStock) {
+        for (UIView *lv in layers) lv.alpha = 1.0;
+        iv.hidden = NO;
+        restorePrediction();
+    } else {
+        if (bgLayer) { bgLayer.alpha = 0.0; bgLayer.hidden = NO; }
+        iv.hidden = NO;
     }
-    // 确保背景视图可见
-    iv.hidden = NO;
-    if (planeLayer && planeLayer != bgLayer && planeImg) {
-        planeLayer.layer.contents = (__bridge id)planeImg.CGImage;
-        planeLayer.layer.contentsGravity = kCAGravityResizeAspectFill;
-        planeLayer.layer.contentsScale = UIScreen.mainScreen.scale;
-    }
+
+    // 不再修改系统键面贴图 contents（Laetus 的 setImage 通道在当前系统不触发，
+    // 事后改写会在系统重绘时被覆盖，并可能误伤键帽/文字）
 
     // 3) 顶部预测栏背景（灰色横条）
     UIEdgeInsets pad = UIEdgeInsetsZero;
@@ -490,7 +561,12 @@ static void KSAttach(UIView *layoutStar) {
                     pv.frame = v.bounds;
                     if (pv.superview != v) [v insertSubview:pv atIndex:0];
                     pv.image = pred;
+                    pv.hidden = NO;
                     [CATransaction commit];
+                    if (!objc_getAssociatedObject(v, &kKSAssocColor)) {
+                        objc_setAssociatedObject(v, &kKSAssocColor, v.backgroundColor,
+                                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                    }
                     v.backgroundColor = UIColor.clearColor;
                     [detail appendFormat:@"[pred %@ %.0f] ", KSClassOf(v), hgt];
                 }
@@ -499,101 +575,60 @@ static void KSAttach(UIView *layoutStar) {
     }
     (void)pad;
 
-    KSLog(@"attach plane=%@ lastPlane=%@ key=%@ layers=%lu bg=%@ plane=%@ minVar=%.0f maxVar=%.0f %@",
+    KSLog(@"attach plane=%@ lastPlane=%@ key=%@ layers=%lu bg=%@ minVar=%.0f maxVar=%.0f %@",
           plane ?: @"(nil)", ksLastPlane ?: @"(nil)", KSKeyForPlane(plane), (unsigned long)layers.count,
-          bgLayer ? KSClassOf(bgLayer) : @"(nil)",
-          planeLayer ? KSClassOf(planeLayer) : @"(nil)", minVar, maxVar, detail);
+          bgLayer ? KSClassOf(bgLayer) : @"(nil)", minVar, maxVar, detail);
 
-    // contents 可能还没渲染好，稍后重试两次
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{ KSAttachLate(layoutStar); });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.45 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{ KSAttachLate(layoutStar); });
-}
-
-static void KSAttachLate(UIView *layoutStar) {
-    @try {
-        if (!ksEnabled || !ksThemePath || !layoutStar.superview) return;
-        static NSTimeInterval lastLate = 0;
-        NSTimeInterval now = [NSDate.date timeIntervalSince1970];
-        if (now - lastLate < 0.8) return;   // 去重，防 layoutSubviews 风暴
-        lastLate = now;
-        BOOL landscape = UIScreen.mainScreen.bounds.size.width > UIScreen.mainScreen.bounds.size.height;
-        UIImage *bgImg = KSImageForKey(@"KeyboardMainBG", landscape);
-        if (!bgImg) return;
-        NSString *plane = KSLastPlaneName();
-        NSString *plKey = KSKeyPlaneImageName(plane);
-        UIImage *planeImg = plKey ? KSImageForKey(plKey, landscape) : nil;
-
-        NSMutableArray *layers = [NSMutableArray array];
-        for (UIView *v in layoutStar.subviews) {
-            if (![KSClassOf(v) containsString:@"Keyplane"]) continue;
-            for (UIView *lv in v.subviews) {
-                if ([KSClassOf(lv) containsString:@"SplitImageView"] &&
-                    lv.frame.size.width >= layoutStar.bounds.size.width * 0.9) [layers addObject:lv];
+    // 低频层级 dump + 键 displayType 采样（首 3 次 + 每 60 次一次）
+    static int attachCount = 0;
+    attachCount++;
+    if (attachCount <= 3 || attachCount % 60 == 0) {
+        NSMutableString *tree = [NSMutableString string];
+        NSMutableArray *stack = [NSMutableArray arrayWithObject:container];
+        NSUInteger depth = 0;
+        while (stack.count && depth < 5) {
+            NSMutableArray *next = [NSMutableArray array];
+            for (UIView *v in stack) {
+                [tree appendFormat:@"\n%@+ %@ f=%@ a=%.2f h=%d",
+                 [@"  " stringByPaddingToLength:depth*2 withString:@" " startingAtIndex:0],
+                 KSClassOf(v), NSStringFromCGRect(v.bounds), v.alpha, v.hidden];
+                if ([KSClassOf(v) containsString:@"KeyView"]) {
+                    NSNumber *dt = nil;
+                    @try { dt = [v valueForKey:@"displayType"]; } @catch (__unused NSException *e) {}
+                    if (dt) [tree appendFormat:@" dt=%@", dt];
+                }
+                [next addObjectsFromArray:v.subviews];
             }
+            stack = next;
+            depth++;
         }
-        UIView *bgLayer = nil, *planeLayer = nil;
-        double minVar = 1e18, maxVar = -1;
-        for (UIView *lv in layers) {
-            double var = KSVarianceOfCGImage(KSContentCGImage(lv));
-            if (var < 0) continue;
-            if (var < minVar) { minVar = var; bgLayer = lv; }
-            if (var > maxVar) { maxVar = var; planeLayer = lv; }
-        }
-        if (bgLayer) {
-            bgLayer.layer.contents = (__bridge id)bgImg.CGImage;
-            bgLayer.layer.contentsGravity = kCAGravityResizeAspectFill;
-        }
-        if (planeLayer && planeLayer != bgLayer && planeImg) {
-            planeLayer.layer.contents = (__bridge id)planeImg.CGImage;
-            planeLayer.layer.contentsGravity = kCAGravityResizeAspectFill;
-        }
-    } @catch (__unused NSException *e) {}
+        KSLog(@"hier:%@", tree);
+    }
+
 }
+
 
 #pragma mark - Hooks
 
-// setImage:cachedWidth:keyplane: —— Laetus 双图族方案
-// 传入的 image 是系统渲染好的整键面贴图。用亮度方差区分它是哪一层：
-//   低方差 = 背景层（模糊/纯色）      → 换成 KeyboardMainBG*
-//   高方差 = 键面层（满是键帽造型）  → 换成 Keyboard*KeyPlane*
-// 若主题没有键面图，则不放行替换，保证字母/键帽仍是系统的。
+// setImage:cachedWidth:keyplane: —— 纯观测（不替换）。
+// Laetus 的双图族替换在 iOS 17 上该入口从未被调用，且事后改写 contents
+// 会被系统重绘覆盖并可能误伤键帽/文字，故仅在 keyplane 切换/图像更新时
+// 记录 filterType/plane/var，用于诊断真实图层语义。
 static IMP orig_setImage = NULL;
 static void ks_setImage(UIView *self, SEL _cmd, UIImage *image, double width, id keyplane) {
     UIImage *out = image;
     @try {
         if (ksEnabled && ksThemePath && image) {
             CGRect f = self.bounds;
-            if (f.size.width < UIScreen.mainScreen.bounds.size.width * 0.85) {
-                ((void (*)(id, SEL, UIImage *, double, id))orig_setImage)(self, _cmd, image, width, keyplane);
-                return;   // 小的是键位贴图，放行
-            }
+            NSString *type = nil;
+            @try { type = [self valueForKey:@"filterType"]; } @catch (__unused NSException *e) {}
             NSString *plane = nil;
             @try { plane = [keyplane valueForKey:@"name"]; } @catch (__unused NSException *e) {}
-            if (!plane.length) plane = KSLastPlaneName();
-            BOOL landscape = UIScreen.mainScreen.bounds.size.width > UIScreen.mainScreen.bounds.size.height;
-
-            double var = KSImageVariance(image);
-            BOOL isBackground = (var < 600.0);
-
-            UIImage *theme = nil;
-            NSString *which = nil;
-            if (isBackground) {
-                theme = KSImageForKey(@"KeyboardMainBG", landscape);
-                which = @"MainBG";
-            } else {
-                NSString *plKey = KSKeyPlaneImageName(plane);
-                if (plKey) {
-                    theme = KSImageForKey(plKey, landscape);
-                    which = plKey;
-                }
-            }
-            if (theme) {
-                out = theme;
-                static int logs = 0;
-                if (logs++ < 24) KSLog(@"setImage %@ var=%.0f -> %@ (plane=%@)",
-                                       isBackground ? @"BG" : @"PLANE", var, which, plane ?: @"(nil)");
+            static int logs = 0;
+            if (logs++ < 20) {
+                double var = KSImageVariance(image);
+                KSLog(@"setImage(obs) class=%@ w=%.0f ft=%@ plane=%@ var=%.0f",
+                      KSClassOf(self), f.size.width, type ?: @"-", plane ?: @"-", var);
             }
         }
     } @catch (NSException *e) { KSLog(@"exc setImage: %@", e); }
@@ -604,7 +639,6 @@ static IMP orig_layoutSubviews = NULL;
 static void ks_layoutSubviews(UIView *self, SEL _cmd) {
     ((void (*)(id, SEL))orig_layoutSubviews)(self, _cmd);
     @try {
-        if (!ksEnabled || !ksThemePath) return;
         @try {
             NSString *pn = [self valueForKey:@"keyplaneName"];
             if (pn.length) ksLastPlane = pn;
@@ -617,7 +651,6 @@ static IMP orig_didChangeKeyplane = NULL;
 static void ks_didChangeKeyplane(UIView *self, SEL _cmd, id ctx) {
     ((void (*)(id, SEL, id))orig_didChangeKeyplane)(self, _cmd, ctx);
     @try {
-        if (!ksEnabled) return;
         NSString *plane = nil;
         @try { plane = [self valueForKey:@"keyplaneName"]; } @catch (__unused NSException *e) {}
         if (!plane.length) {
@@ -625,7 +658,6 @@ static void ks_didChangeKeyplane(UIView *self, SEL _cmd, id ctx) {
         }
         if (plane.length) ksLastPlane = plane;
         KSLog(@"keyplane: %@ (cached %@)", plane ?: @"(nil)", ksLastPlane ?: @"(nil)");
-        objc_setAssociatedObject(self.superview, &kKSAssocSignature, nil, OBJC_ASSOCIATION_COPY_NONATOMIC);
         dispatch_async(dispatch_get_main_queue(), ^{ KSAttach(self); });
     } @catch (NSException *e) { KSLog(@"exc keyplane: %@", e); }
 }
@@ -641,10 +673,26 @@ static void ks_showKeyboard(UIView *self, SEL _cmd, id traits, id screen, id spl
 
 #pragma mark - 安装
 
+// 递归在窗口子树里找 UIKeyboardLayoutStar 并重新应用
+static void KSFindAndAttach(UIView *v) {
+    if (!v) return;
+    if ([KSClassOf(v) isEqualToString:@"UIKeyboardLayoutStar"]) {
+        KSAttach(v);
+        return;
+    }
+    for (UIView *sub in v.subviews) KSFindAndAttach(sub);
+}
+static void KSReattachAll(void) {
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:UIWindowScene.class]) continue;
+        for (UIWindow *w in ((UIWindowScene *)scene).windows) KSFindAndAttach(w);
+    }
+}
 static void KSConfigChanged(CFNotificationCenterRef c, void *o, CFStringRef n, const void *p, CFDictionaryRef d) {
     KSReloadPrefs();
     KSLog(@"config changed: scale=%.2f offsetY=%.0f mode=%ld hideCaps=%d corner=%.0f",
           ksScale, ksOffsetY, (long)ksFillMode, ksHideKeyCaps, ksCornerRadius);
+    dispatch_async(dispatch_get_main_queue(), ^{ KSReattachAll(); });
 }
 
 static void KSInstall(void) {
@@ -683,7 +731,7 @@ __attribute__((constructor))
 static void KSInit(void) {
     @autoreleasepool {
         KSReloadPrefs();
-        KSLog(@"KeyboardSkin 1.7 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
+        KSLog(@"KeyboardSkin 1.8 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
               NSProcessInfo.processInfo.processName, ksEnabled, ksHideStock, ksThemeName, ksThemePath);
         KSInstall();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
