@@ -55,6 +55,7 @@ static void KSLog(NSString *format, ...) {
 static BOOL ksEnabled = YES;
 static BOOL ksHideStock = YES;
 static BOOL ksEnableImageReplace = NO;
+static BOOL ksColorEngine = YES;     // 颜色引擎（Laetus 式着色）独立开关
 static NSString *ksThemeName = nil;
 static NSString *ksThemePath = nil;
 static NSInteger ksGen = 0;
@@ -147,6 +148,7 @@ static void KSReloadPrefs(void) {
     ksEnabled = KSBool(@"Enabled", YES);
     ksHideStock = KSBool(@"HideStock", YES);
     ksEnableImageReplace = KSBool(@"EnableImageReplace", NO);
+    ksColorEngine = KSBool(@"ColorEngineEnabled", YES);
     ksCornerRadius = (CGFloat)KSInt(@"CornerRadius", 0);
     ksHideKeyCaps = KSBool(@"HideKeyCaps", NO);
     ksFillMode = KSInt(@"FillMode", 0);
@@ -163,6 +165,22 @@ static void KSReloadPrefs(void) {
 
 #pragma mark - 颜色引擎（UIKBGetNamedColor）
 
+static uint32_t KSHexVal(unichar c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return 0;
+}
+static UIColor *KSColorFromHex(NSString *hex) {
+    if (!hex || hex.length < 6) return nil;
+    NSString *h = hex;
+    if ([h hasPrefix:@"#"]) h = [h substringFromIndex:1];
+    if (h.length < 6) return nil;
+    uint32_t r = (KSHexVal([h characterAtIndex:0]) << 4) | KSHexVal([h characterAtIndex:1]);
+    uint32_t g = (KSHexVal([h characterAtIndex:2]) << 4) | KSHexVal([h characterAtIndex:3]);
+    uint32_t b = (KSHexVal([h characterAtIndex:4]) << 4) | KSHexVal([h characterAtIndex:5]);
+    return [UIColor colorWithRed:r/255.0 green:g/255.0 blue:b/255.0 alpha:1.0];
+}
 static UIColor *KSColorRGB(int rgb) {
     return [UIColor colorWithRed:((rgb >> 16) & 0xFF) / 255.0
                            green:((rgb >> 8) & 0xFF) / 255.0
@@ -170,14 +188,23 @@ static UIColor *KSColorRGB(int rgb) {
                            alpha:1.0];
 }
 
+static NSString *KSPrefString(NSString *key) {
+    id v = CFBridgingRelease(CFPreferencesCopyAppValue((__bridge CFStringRef)key,
+                     (__bridge CFStringRef)@"com.ning.keyboardskin"));
+    return [v isKindOfClass:[NSString class]] ? v : nil;
+}
 static UIColor *KSColorForFactoryKey(NSString *key) {
     BOOL dark = [ksThemeName localizedCaseInsensitiveContainsString:@"dark"];
-    if ([key isEqualToString:@"keycap"]) return dark ? KSColorRGB(0x3a3a42) : KSColorRGB(0xffffff);
-    if ([key isEqualToString:@"ctrlbg"]) return dark ? KSColorRGB(0x47474f) : KSColorRGB(0xefeff4);
-    if ([key isEqualToString:@"ctrlfg"]) return dark ? KSColorRGB(0xffffff) : KSColorRGB(0x1a1a1a);
-    if ([key isEqualToString:@"shadow"]) return dark ? KSColorRGB(0x000000) : KSColorRGB(0x000000);
-    if ([key isEqualToString:@"lowbg"]) return dark ? KSColorRGB(0x26262a) : KSColorRGB(0xe8e8ec);
-    return nil;
+    NSString *prefKey = nil;
+    NSString *fallback = nil;
+    if ([key isEqualToString:@"keycap"]) { prefKey = @"ColorKeycap"; fallback = dark ? @"#3a3a42" : @"#ffffff"; }
+    else if ([key isEqualToString:@"ctrlbg"]) { prefKey = @"ColorCtrlBG"; fallback = dark ? @"#47474f" : @"#efeff4"; }
+    else if ([key isEqualToString:@"ctrlfg"]) { prefKey = @"ColorCtrlFG"; fallback = dark ? @"#ffffff" : @"#1a1a1a"; }
+    else if ([key isEqualToString:@"shadow"]) { prefKey = @"ColorShadow"; fallback = @"#000000"; }
+    else if ([key isEqualToString:@"lowbg"]) { prefKey = @"ColorLowBG"; fallback = dark ? @"#26262a" : @"#e8e8ec"; }
+    else return nil;
+    UIColor *c = KSColorFromHex(KSPrefString(prefKey));
+    return c ?: KSColorFromHex(fallback);
 }
 
 static UIColor *ksColourForName(NSString *n) {
@@ -211,7 +238,7 @@ static UIColor *ksColourForName(NSString *n) {
 
 static UIColor *(*orig_getNamedColor)(CFStringRef) = NULL;
 static UIColor *ksGetNamedColor(CFStringRef name) {
-    if (name && ksEnabled) {
+    if (name && ksEnabled && ksColorEngine) {
         NSString *n = (__bridge NSString *)name;
         if ([n hasPrefix:@"ks_"]) {
             NSString *key = [n substringFromIndex:3];
@@ -237,15 +264,30 @@ static NSString *KSFactoryColorName(NSString *key) {
 }
 typedef id (*RenderFactoryFn)(id, SEL);
 static RenderFactoryFn orig_factoryDefaultKeyBG;
-static id ks_factoryDefaultKeyBG(id self, SEL _cmd) { return KSFactoryColorName(@"keycap"); }
+static id ks_factoryDefaultKeyBG(id self, SEL _cmd) {
+    if (!ksEnabled || !ksColorEngine) return orig_factoryDefaultKeyBG(self, _cmd);
+    return KSFactoryColorName(@"keycap");
+}
 static RenderFactoryFn orig_factoryCtrlBG;
-static id ks_factoryCtrlBG(id self, SEL _cmd) { return KSFactoryColorName(@"ctrlbg"); }
+static id ks_factoryCtrlBG(id self, SEL _cmd) {
+    if (!ksEnabled || !ksColorEngine) return orig_factoryCtrlBG(self, _cmd);
+    return KSFactoryColorName(@"ctrlbg");
+}
 static RenderFactoryFn orig_factoryCtrlFG;
-static id ks_factoryCtrlFG(id self, SEL _cmd) { return KSFactoryColorName(@"ctrlfg"); }
+static id ks_factoryCtrlFG(id self, SEL _cmd) {
+    if (!ksEnabled || !ksColorEngine) return orig_factoryCtrlFG(self, _cmd);
+    return KSFactoryColorName(@"ctrlfg");
+}
 static RenderFactoryFn orig_factoryShadow;
-static id ks_factoryShadow(id self, SEL _cmd) { return KSFactoryColorName(@"shadow"); }
+static id ks_factoryShadow(id self, SEL _cmd) {
+    if (!ksEnabled || !ksColorEngine) return orig_factoryShadow(self, _cmd);
+    return KSFactoryColorName(@"shadow");
+}
 static RenderFactoryFn orig_factoryLowBG;
-static id ks_factoryLowBG(id self, SEL _cmd) { return KSFactoryColorName(@"lowbg"); }
+static id ks_factoryLowBG(id self, SEL _cmd) {
+    if (!ksEnabled || !ksColorEngine) return orig_factoryLowBG(self, _cmd);
+    return KSFactoryColorName(@"lowbg");
+}
 
 static void KSHookFactoryColorNames(void) {
     Class cls = NSClassFromString(@"UIKBRenderFactory");
@@ -365,7 +407,7 @@ __attribute__((constructor))
 static void KSInit(void) {
     @autoreleasepool {
         KSReloadPrefs();
-        KSLog(@"KeyboardSkin 1.9.3 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
+        KSLog(@"KeyboardSkin 1.9.4 init [%@] — enabled=%d hideStock=%d theme='%@' path=%@",
               NSProcessInfo.processInfo.processName, ksEnabled, ksHideStock, ksThemeName, ksThemePath);
         KSInstall();
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),

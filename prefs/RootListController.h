@@ -2,5 +2,5 @@
 #import <UIKit/UIKit.h>
 #import "PSCompat.h"
 
-@interface KeyboardSkinRootListController : PSListController
+@interface KeyboardSkinRootListController : PSListController <UIColorPickerViewControllerDelegate>
 @end

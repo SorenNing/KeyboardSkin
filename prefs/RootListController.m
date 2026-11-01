@@ -1,4 +1,5 @@
 #import "RootListController.h"
+#import <notify.h>
 
 #define KS_DOMAIN @"com.ning.keyboardskin"
 static NSString * const kKSDomain = @"com.ning.keyboardskin";
@@ -161,11 +162,54 @@ static NSString * const kKSDomain = @"com.ning.keyboardskin";
 }
 
 -(void)respring:(PSSpecifier *)specifier {
-    pid_t pid = fork();
-    if (pid == 0) {
-        execl("/usr/bin/killall", "killall", "-9", "SpringBoard", (char *)NULL);
-        _exit(0);
+    // 通知 SpringBoard 自己触发注销（无需 root，roothide 下最可靠）
+    notify_post("com.apple.springboard.respring");
+    // 兜底：通知延迟 1.5s 后 killall 强行重启
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        pid_t pid = fork();
+        if (pid == 0) {
+            execl("/var/jb/usr/bin/killall", "killall", "-9", "SpringBoard", (char *)NULL);
+            execl("/usr/bin/killall", "killall", "-9", "SpringBoard", (char *)NULL);
+            _exit(0);
+        }
+    });
+}
+
+// ---- 调色盘：系统原生 UIColorPickerViewController ----
+static NSString *ksCurrentColorKey = nil;
+
+-(void)pickColor:(PSSpecifier *)specifier {
+    if ([[[UIDevice currentDevice] systemVersion] floatValue] < 14.0) {
+        UIAlertController *al = [UIAlertController alertControllerWithTitle:@"提示"
+            message:@"取色器需要 iOS 14+，请直接在偏好里填十六进制色值" preferredStyle:UIAlertControllerStyleAlert];
+        [al addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+        [self presentViewController:al animated:YES completion:nil];
+        return;
     }
+    ksCurrentColorKey = specifier.identifier ?: @"ColorKeycap";
+    UIColorPickerViewController *picker = [[UIColorPickerViewController alloc] init];
+    picker.supportsAlpha = NO;
+    picker.delegate = self;
+    [self presentViewController:picker animated:YES completion:nil];
+}
+
+- (void)colorPickerViewControllerDidSelectColor:(UIColorPickerViewController *)viewController {
+    UIColor *c = viewController.selectedColor;
+    if (!c || !ksCurrentColorKey) return;
+    CGFloat r=0,g=0,b=0,a=0;
+    [c getRed:&r green:&g blue:&b alpha:&a];
+    NSString *hex = [NSString stringWithFormat:@"#%02X%02X%02X",
+                      (int)(r*255.0), (int)(g*255.0), (int)(b*255.0)];
+    CFPreferencesSetAppValue((__bridge CFStringRef)ksCurrentColorKey,
+                             (__bridge CFPropertyListRef)hex,
+                             (__bridge CFStringRef)kKSDomain);
+    CFPreferencesAppSynchronize((__bridge CFStringRef)kKSDomain);
+    CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                         (__bridge CFStringRef)KS_CHANGED, NULL, NULL, YES);
+}
+
+- (void)colorPickerViewControllerDidFinish:(UIColorPickerViewController *)viewController {
+    [self dismissViewControllerAnimated:YES completion:nil];
 }
 
 @end

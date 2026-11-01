@@ -152,6 +152,76 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
+			<string>颜色</string>
+			<key>footerText</key>
+			<string>颜色引擎按 Laetus 机制给系统键盘着色。取色器会把颜色直接写进偏好，重新弹出键盘生效。</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<true/>
+			<key>defaults</key>
+			<string>com.ning.keyboardskin</string>
+			<key>key</key>
+			<string>ColorEngineEnabled</string>
+			<key>label</key>
+			<string>启用颜色引擎</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>action</key>
+			<string>pickColor:</string>
+			<key>label</key>
+			<string>键帽背景色…</string>
+			<key>identifier</key>
+			<string>ColorKeycap</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>action</key>
+			<string>pickColor:</string>
+			<key>label</key>
+			<string>控制键背景色（Shift/删除）…</string>
+			<key>identifier</key>
+			<string>ColorCtrlBG</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>action</key>
+			<string>pickColor:</string>
+			<key>label</key>
+			<string>控制键前景色（文字/图标）…</string>
+			<key>identifier</key>
+			<string>ColorCtrlFG</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>action</key>
+			<string>pickColor:</string>
+			<key>label</key>
+			<string>键阴影色…</string>
+			<key>identifier</key>
+			<string>ColorShadow</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>action</key>
+			<string>pickColor:</string>
+			<key>label</key>
+			<string>低质量背景色（分屏/浮窗）…</string>
+			<key>identifier</key>
+			<string>ColorLowBG</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
 			<string>工具</string>
 		</dict>
 		<dict>
@@ -176,7 +246,7 @@
 			<key>label</key>
 			<string>关于</string>
 			<key>footerText</key>
-			<string>键盘皮肤 1.5（内置 Coolwcat）
+			<string>键盘皮肤 1.9.4（内置 Coolwcat）
 作者: Ning
 日志: /var/mobile/Library/KeyboardSkin.log</string>
 		</dict>
